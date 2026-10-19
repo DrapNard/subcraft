@@ -9,7 +9,9 @@
 
 use serde::{Deserialize, Serialize};
 use subcraft_core::ChannelKind;
-use subcraft_doc::{BlendMode, ChannelFormat, FillSource, Generator, Levels, ProceduralParams, Projection};
+use subcraft_doc::{
+    BlendMode, ChannelFormat, FillSource, Generator, Levels, ProceduralParams, Projection,
+};
 use uuid::Uuid;
 
 /// 1: initial. 2: mask `Image` effect (v1 files load unchanged; v2 files need SubCraft >= 0.1 with
@@ -17,10 +19,12 @@ use uuid::Uuid;
 // 3: object metadata (mesh blob v2) and geometry-mask domains. Legacy projects still load.
 // 4: editable pen paths, with anchor UUIDs, UV handles, style and a derived raster cache.
 // 5: per-layer content effect stacks (`content_effects`; absent = none, so 1-4 load unchanged).
-pub const SCHEMA_VERSION: u32 = 5;
+// 6: bounded procedural Roughness graphs with stable layer references.
+pub const SCHEMA_VERSION: u32 = 6;
 pub const FORMAT_NAME: &str = "subcraft-project";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub format: String,
     pub schema_version: u32,
@@ -31,6 +35,7 @@ pub struct Manifest {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DocumentV1 {
     pub texture_sets: Vec<TextureSetV1>,
     #[serde(default)]
@@ -38,6 +43,7 @@ pub struct DocumentV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TextureSetV1 {
     pub id: Uuid,
     pub name: String,
@@ -52,18 +58,21 @@ pub struct TextureSetV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MeshMapV1 {
     pub kind: subcraft_core::MeshMapKind,
     pub raster: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ChannelDefV1 {
     pub kind: ChannelKind,
     pub format: ChannelFormat,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BlendV1 {
     pub channel: ChannelKind,
     pub mode: BlendMode,
@@ -71,6 +80,7 @@ pub struct BlendV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LayerV1 {
     pub id: Uuid,
     pub name: String,
@@ -88,6 +98,7 @@ pub struct LayerV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ContentEffectV5 {
     pub id: Uuid,
     pub name: String,
@@ -97,14 +108,24 @@ pub struct ContentEffectV5 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentEffectKindV5 {
-    Paint { channels: Vec<PaintChannelV1> },
-    Fill { projection: Projection, channels: Vec<FillChannelV1> },
-    Levels { channel: ChannelKind, levels: Levels },
+    Paint {
+        channels: Vec<PaintChannelV1>,
+    },
+    Fill {
+        projection: Projection,
+        channels: Vec<FillChannelV1>,
+    },
+    Levels {
+        channel: ChannelKind,
+        levels: Levels,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PartsV1 {
     pub enabled: bool,
     #[serde(default)]
@@ -113,6 +134,7 @@ pub struct PartsV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PaintChannelV1 {
     pub channel: ChannelKind,
     /// Path of the raster blob inside the container.
@@ -120,6 +142,7 @@ pub struct PaintChannelV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FillChannelV1 {
     pub channel: ChannelKind,
     pub enabled: bool,
@@ -134,18 +157,28 @@ fn one() -> f32 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentV1 {
     Paint {
         channels: Vec<PaintChannelV1>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        procedural_graph: Option<subcraft_doc::ProceduralGraph>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         path: Option<PenPathV4>,
     },
-    Fill { projection: Projection, channels: Vec<FillChannelV1> },
-    Folder { expanded: bool, children: Vec<LayerV1> },
+    Fill {
+        projection: Projection,
+        channels: Vec<FillChannelV1>,
+    },
+    Folder {
+        expanded: bool,
+        children: Vec<LayerV1>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PenAnchorV4 {
     pub id: Uuid,
     pub position: [f32; 2],
@@ -154,9 +187,14 @@ pub struct PenAnchorV4 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PenChannelV4 { pub channel: ChannelKind, pub value: [f32; 3] }
+#[serde(deny_unknown_fields)]
+pub struct PenChannelV4 {
+    pub channel: ChannelKind,
+    pub value: [f32; 3],
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PenPathV4 {
     pub anchors: Vec<PenAnchorV4>,
     pub closed: bool,
@@ -167,6 +205,7 @@ pub struct PenPathV4 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaskV1 {
     pub enabled: bool,
     pub base: String,
@@ -174,6 +213,7 @@ pub struct MaskV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct MaskEffectV1 {
     pub id: Uuid,
     pub name: String,
@@ -184,22 +224,55 @@ pub struct MaskEffectV1 {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MaskEffectKindV1 {
-    Paint { raster: String },
-    Fill { value: f32, procedural: Option<ProceduralParams>, projection: Projection },
-    Generator { generator: Generator },
-    Levels { levels: Levels },
+    Paint {
+        raster: String,
+    },
+    Fill {
+        value: f32,
+        procedural: Option<ProceduralParams>,
+        projection: Projection,
+    },
+    Generator {
+        generator: Generator,
+    },
+    Levels {
+        levels: Levels,
+    },
     Invert,
     /// Schema 2.
-    Image { resource: Uuid, projection: Projection, invert: bool },
+    Image {
+        resource: Uuid,
+        projection: Projection,
+        invert: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ResourceV1 {
     pub id: Uuid,
     pub name: String,
     pub kind: subcraft_doc::ResourceKind,
     /// Path of the stored file inside the container (original encoded bytes).
     pub file: String,
+}
+
+#[cfg(test)]
+mod forward_data_tests {
+    use super::*;
+
+    #[test]
+    fn unknown_native_fields_reject_instead_of_disappearing_on_save() {
+        let value = serde_json::json!({"format":FORMAT_NAME,"schema_version":SCHEMA_VERSION,
+            "writer":"test","mesh":"mesh.bin","document":"document.json",
+            "future_artist_data":{"retain":true}});
+        assert!(serde_json::from_value::<Manifest>(value).is_err());
+        let value = serde_json::json!({"texture_sets":[],"future_artist_data":[1,2,3]});
+        assert!(serde_json::from_value::<DocumentV1>(value).is_err());
+        let value = serde_json::json!({"type":"paint","channels":[],"future_effect":true});
+        assert!(serde_json::from_value::<ContentV1>(value).is_err());
+    }
 }

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 /// Where bug reports go.
-pub const ISSUES_URL: &str = "https://github.com/Aalzard/subcraft/issues/new";
+pub const ISSUES_URL: &str = "https://github.com/DrapNard/subcraft/issues/new";
 /// Log files kept (`subcraft.log` + `subcraft.1.log` … older).
 pub const LOG_FILES_KEPT: usize = 5;
 /// A log file is rotated during the run once it grows past this.
@@ -385,7 +385,7 @@ mod tests {
     fn issue_link_carries_version_os_and_gpu() {
         let info = SystemInfo { version: "0.1.2".into(), os: "Windows 10.0.26200 (x86_64)".into(), gpu: "NVIDIA GeForce RTX 4060 (Dx12)".into() };
         let url = bug_report_url(&info, None, Some(Path::new("C:\\Users\\me\\AppData\\Local\\SubCraft\\logs\\subcraft.log")));
-        assert!(url.starts_with("https://github.com/Aalzard/subcraft/issues/new?template=bug_report.yml"));
+        assert!(url.starts_with("https://github.com/DrapNard/subcraft/issues/new?template=bug_report.yml"));
         assert!(url.contains("version=0.1.2"));
         assert!(url.contains("gpu=NVIDIA%20GeForce%20RTX%204060%20%28Dx12%29"), "{url}");
         assert!(url.contains("os=Windows%2010.0.26200%20%28x86_64%29"));

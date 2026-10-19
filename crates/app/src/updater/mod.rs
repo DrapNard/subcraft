@@ -8,7 +8,7 @@ use std::{path::{Path, PathBuf}, io::{Read, Write}, sync::mpsc::{self, Receiver}
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const RELEASE_API: &str = "https://api.github.com/repos/Aalzard/subcraft/releases/latest";
+pub const RELEASE_API: &str = "https://api.github.com/repos/DrapNard/subcraft/releases/latest";
 pub const MAX_PACKAGE: u64 = 512 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PackageKind { WindowsInstaller { admin: bool }, WindowsPortable, LinuxPortable }
@@ -43,7 +43,7 @@ impl Release {
     pub fn validate(&self) -> Result<(), String> {
         let v = semver::Version::parse(&self.version).map_err(|_| "Invalid update version")?;
         if !v.pre.is_empty() || self.asset.name != self.kind.name(&self.version) || self.asset.size == 0 || self.asset.size > MAX_PACKAGE { return Err("Invalid update package".into()); }
-        let expected = format!("https://github.com/Aalzard/subcraft/releases/download/v{}/{}", self.version, self.asset.name);
+        let expected = format!("https://github.com/DrapNard/subcraft/releases/download/v{}/{}", self.version, self.asset.name);
         if self.asset.browser_download_url != expected { return Err("Update package is outside the SubCraft release repository".into()); }
         digest_hex(&self.asset.digest)?; Ok(())
     }
@@ -122,7 +122,7 @@ fn check_release_api(url: &str, current: &str, kind: PackageKind) -> Result<Opti
     if text.len() > 1024 * 1024 { return Err("Release response is too large".into()); } parse_release(&text, current, kind)
 }
 pub fn verify_release_authority(release: &Release) -> Result<(), String> {
-    let url = format!("https://api.github.com/repos/Aalzard/subcraft/releases/tags/v{}", release.version);
+    let url = format!("https://api.github.com/repos/DrapNard/subcraft/releases/tags/v{}", release.version);
     let official = check_release_api(&url, "0.0.0", release.kind)?.ok_or("Release is unavailable")?;
     if official.asset.digest != release.asset.digest || official.asset.size != release.asset.size || official.asset.name != release.asset.name { return Err("The release package changed; check and download it again".into()); } Ok(())
 }

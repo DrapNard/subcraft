@@ -27,26 +27,143 @@ pub fn decode_bitmap(bytes: &[u8], name: Option<&str>) -> Result<Bitmap, ImageIo
             .and_then(|n| image::ImageFormat::from_path(n).ok())
             .ok_or(e)?,
     };
-    Ok(from_dynamic(image::load_from_memory_with_format(bytes, format)?))
+    Ok(from_dynamic(image::load_from_memory_with_format(
+        bytes, format,
+    )?))
+}
+
+/// Decode an untrusted image only after its header dimensions and conservative output-size
+/// estimate fit caller-supplied bounds. The estimate assumes four 32-bit channels per pixel,
+/// which covers the largest in-memory representation produced by `from_dynamic`.
+pub fn decode_bitmap_bounded(
+    bytes: &[u8],
+    name: Option<&str>,
+    max_dimension: u32,
+    max_decoded_bytes: u64,
+) -> Result<Bitmap, ImageIoError> {
+    use std::io::Cursor;
+
+    let format = image_format(bytes, name)?;
+    let estimated_bytes = bitmap_decoded_cost(bytes, name, max_dimension)?;
+    if estimated_bytes > max_decoded_bytes {
+        return Err(ImageIoError::Unsupported(format!(
+            "image decoded size exceeds {max_decoded_bytes} bytes"
+        )));
+    }
+    let mut reader = image::ImageReader::with_format(Cursor::new(bytes), format);
+    let mut limits = image::Limits::default();
+    limits.max_image_width = Some(max_dimension);
+    limits.max_image_height = Some(max_dimension);
+    limits.max_alloc = Some(max_decoded_bytes);
+    reader.limits(limits);
+    let decoded = reader.decode()?;
+    Ok(from_dynamic(decoded))
+}
+
+/// Conservative in-memory byte bound for a supported image, obtained from the header before
+/// decoding. The bound assumes four 32-bit channels per pixel.
+pub fn bitmap_decoded_cost(
+    bytes: &[u8],
+    name: Option<&str>,
+    max_dimension: u32,
+) -> Result<u64, ImageIoError> {
+    use std::io::Cursor;
+    let dimensions =
+        image::ImageReader::with_format(Cursor::new(bytes), image_format(bytes, name)?)
+            .into_dimensions()?;
+    let (width, height) = dimensions;
+    if width == 0 || height == 0 || width > max_dimension || height > max_dimension {
+        return Err(ImageIoError::Unsupported(format!(
+            "image dimensions {width}x{height} exceed the {max_dimension}px limit"
+        )));
+    }
+    u64::from(width)
+        .checked_mul(u64::from(height))
+        .and_then(|pixels| pixels.checked_mul(4 * std::mem::size_of::<f32>() as u64))
+        .ok_or_else(|| ImageIoError::Unsupported("image decoded size overflow".into()))
+}
+
+fn image_format(bytes: &[u8], name: Option<&str>) -> Result<image::ImageFormat, ImageIoError> {
+    match image::guess_format(bytes) {
+        Ok(format) => Ok(format),
+        Err(error) => name
+            .and_then(|name| image::ImageFormat::from_path(name).ok())
+            .ok_or_else(|| ImageIoError::Image(error)),
+    }
 }
 
 fn from_dynamic(img: image::DynamicImage) -> Bitmap {
     use image::DynamicImage as D;
     let (w, h) = (img.width(), img.height());
     match img {
-        D::ImageLuma8(b) => Bitmap { width: w, height: h, channels: 1, data: BitmapData::U8(b.into_raw()) },
-        D::ImageLumaA8(b) => Bitmap { width: w, height: h, channels: 2, data: BitmapData::U8(b.into_raw()) },
-        D::ImageRgb8(b) => Bitmap { width: w, height: h, channels: 3, data: BitmapData::U8(b.into_raw()) },
-        D::ImageRgba8(b) => Bitmap { width: w, height: h, channels: 4, data: BitmapData::U8(b.into_raw()) },
-        D::ImageLuma16(b) => Bitmap { width: w, height: h, channels: 1, data: BitmapData::U16(b.into_raw()) },
-        D::ImageLumaA16(b) => Bitmap { width: w, height: h, channels: 2, data: BitmapData::U16(b.into_raw()) },
-        D::ImageRgb16(b) => Bitmap { width: w, height: h, channels: 3, data: BitmapData::U16(b.into_raw()) },
-        D::ImageRgba16(b) => Bitmap { width: w, height: h, channels: 4, data: BitmapData::U16(b.into_raw()) },
-        D::ImageRgb32F(b) => Bitmap { width: w, height: h, channels: 3, data: BitmapData::F32(b.into_raw()) },
-        D::ImageRgba32F(b) => Bitmap { width: w, height: h, channels: 4, data: BitmapData::F32(b.into_raw()) },
+        D::ImageLuma8(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 1,
+            data: BitmapData::U8(b.into_raw()),
+        },
+        D::ImageLumaA8(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 2,
+            data: BitmapData::U8(b.into_raw()),
+        },
+        D::ImageRgb8(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 3,
+            data: BitmapData::U8(b.into_raw()),
+        },
+        D::ImageRgba8(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 4,
+            data: BitmapData::U8(b.into_raw()),
+        },
+        D::ImageLuma16(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 1,
+            data: BitmapData::U16(b.into_raw()),
+        },
+        D::ImageLumaA16(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 2,
+            data: BitmapData::U16(b.into_raw()),
+        },
+        D::ImageRgb16(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 3,
+            data: BitmapData::U16(b.into_raw()),
+        },
+        D::ImageRgba16(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 4,
+            data: BitmapData::U16(b.into_raw()),
+        },
+        D::ImageRgb32F(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 3,
+            data: BitmapData::F32(b.into_raw()),
+        },
+        D::ImageRgba32F(b) => Bitmap {
+            width: w,
+            height: h,
+            channels: 4,
+            data: BitmapData::F32(b.into_raw()),
+        },
         other => {
             let b = other.to_rgba32f();
-            Bitmap { width: w, height: h, channels: 4, data: BitmapData::F32(b.into_raw()) }
+            Bitmap {
+                width: w,
+                height: h,
+                channels: 4,
+                data: BitmapData::F32(b.into_raw()),
+            }
         }
     }
 }
@@ -81,8 +198,18 @@ pub fn encode_bitmap(b: &Bitmap) -> Result<(Vec<u8>, &'static str), ImageIoError
         BitmapData::F32(v) => {
             let rgba: Vec<f32> = match b.channels {
                 1 => v.iter().flat_map(|&x| [x, x, x, 1.0]).collect(),
-                2 => v.as_chunks::<2>().0.iter().flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
-                3 => v.as_chunks::<3>().0.iter().flat_map(|p| [p[0], p[1], p[2], 1.0]).collect(),
+                2 => v
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
+                    .flat_map(|p| [p[0], p[0], p[0], p[1]])
+                    .collect(),
+                3 => v
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .flat_map(|p| [p[0], p[1], p[2], 1.0])
+                    .collect(),
                 _ => v.clone(),
             };
             let img = D::ImageRgba32F(image::ImageBuffer::from_raw(w, h, rgba).ok_or_else(bad)?);
@@ -95,12 +222,17 @@ pub fn encode_bitmap(b: &Bitmap) -> Result<(Vec<u8>, &'static str), ImageIoError
 }
 
 /// File extensions accepted as texture images (file dialogs, texture-set import).
-pub const IMAGE_EXTENSIONS: [&str; 9] = ["png", "jpg", "jpeg", "tga", "tif", "tiff", "exr", "bmp", "hdr"];
+pub const IMAGE_EXTENSIONS: [&str; 9] = [
+    "png", "jpg", "jpeg", "tga", "tif", "tiff", "exr", "bmp", "hdr",
+];
 
 /// Extension for encoded image bytes: detected from the content, else taken from `name` if it is
 /// a known image extension (TGA has no signature), else "bin".
 pub fn guess_extension(bytes: &[u8], name: Option<&str>) -> String {
-    if let Some(ext) = image::guess_format(bytes).ok().and_then(|f| f.extensions_str().first().copied()) {
+    if let Some(ext) = image::guess_format(bytes)
+        .ok()
+        .and_then(|f| f.extensions_str().first().copied())
+    {
         return ext.to_string();
     }
     name.and_then(|n| std::path::Path::new(n).extension())
@@ -122,8 +254,13 @@ pub enum FileFormat {
 }
 
 impl FileFormat {
-    pub const ALL: [FileFormat; 5] =
-        [FileFormat::Png8, FileFormat::Png16, FileFormat::Tga8, FileFormat::Jpeg, FileFormat::Exr32];
+    pub const ALL: [FileFormat; 5] = [
+        FileFormat::Png8,
+        FileFormat::Png16,
+        FileFormat::Tga8,
+        FileFormat::Jpeg,
+        FileFormat::Exr32,
+    ];
 
     pub fn extension(self) -> &'static str {
         match self {
@@ -160,11 +297,18 @@ pub fn save_image(
     format: FileFormat,
 ) -> Result<(), ImageIoError> {
     let bytes = encode_image(width, height, comps, data, format)?;
-    subcraft_core::vfs::write(path, &bytes).map_err(|e| ImageIoError::Image(image::ImageError::IoError(e)))
+    subcraft_core::vfs::write(path, &bytes)
+        .map_err(|e| ImageIoError::Image(image::ImageError::IoError(e)))
 }
 
 /// Encode `data` like [`save_image`] into an in-memory file.
-pub fn encode_image(width: u32, height: u32, comps: usize, data: &[f32], format: FileFormat) -> Result<Vec<u8>, ImageIoError> {
+pub fn encode_image(
+    width: u32,
+    height: u32,
+    comps: usize,
+    data: &[f32],
+    format: FileFormat,
+) -> Result<Vec<u8>, ImageIoError> {
     assert_eq!(data.len(), (width * height) as usize * comps);
     let mut out = std::io::Cursor::new(Vec::new());
     let q8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
@@ -215,20 +359,29 @@ pub fn encode_image(width: u32, height: u32, comps: usize, data: &[f32], format:
             // EXR via the image crate takes RGB/RGBA float.
             let rgba: Vec<f32> = match comps {
                 1 => data.iter().flat_map(|&v| [v, v, v, 1.0]).collect(),
-                2 => data.chunks_exact(2).flat_map(|p| [p[0], p[0], p[0], p[1]]).collect(),
-                3 => data.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 1.0]).collect(),
+                2 => data
+                    .chunks_exact(2)
+                    .flat_map(|p| [p[0], p[0], p[0], p[1]])
+                    .collect(),
+                3 => data
+                    .chunks_exact(3)
+                    .flat_map(|p| [p[0], p[1], p[2], 1.0])
+                    .collect(),
                 _ => data.to_vec(),
             };
             let img: image::Rgba32FImage =
                 image::ImageBuffer::from_raw(width, height, rgba).expect("size checked");
-            image::DynamicImage::ImageRgba32F(img).write_to(&mut out, image::ImageFormat::OpenExr)?;
+            image::DynamicImage::ImageRgba32F(img)
+                .write_to(&mut out, image::ImageFormat::OpenExr)?;
         }
     }
     Ok(out.into_inner())
 }
 
 fn drop_alpha(data: &[f32]) -> Vec<f32> {
-    data.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect()
+    data.chunks_exact(4)
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect()
 }
 
 #[cfg(test)]
@@ -244,7 +397,9 @@ mod tests {
         save_image(&path, 16, 8, 3, &data, FileFormat::Png8).unwrap();
         let b = load_bitmap(&path).unwrap();
         assert_eq!((b.width, b.height, b.channels), (16, 8, 3));
-        let BitmapData::U8(bytes) = &b.data else { panic!("expected u8") };
+        let BitmapData::U8(bytes) = &b.data else {
+            panic!("expected u8")
+        };
         for (i, &v) in bytes.iter().enumerate() {
             assert_eq!(v as usize, i % 256);
         }
@@ -255,7 +410,11 @@ mod tests {
     fn guesses_extension_from_content() {
         let dir = std::env::temp_dir().join(format!("subcraft-guess-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        for (name, fmt, ext) in [("a.png", FileFormat::Png8, "png"), ("b.tga", FileFormat::Tga8, "tga"), ("c.exr", FileFormat::Exr32, "exr")] {
+        for (name, fmt, ext) in [
+            ("a.png", FileFormat::Png8, "png"),
+            ("b.tga", FileFormat::Tga8, "tga"),
+            ("c.exr", FileFormat::Exr32, "exr"),
+        ] {
             let path = dir.join(name);
             save_image(&path, 2, 2, 3, &[0.5; 12], fmt).unwrap();
             let bytes = std::fs::read(&path).unwrap();
@@ -264,17 +423,35 @@ mod tests {
             let b = decode_bitmap(&bytes, Some(name)).unwrap();
             assert_eq!((b.width, b.height), (2, 2), "{name}");
         }
-        assert_eq!(guess_extension(b"<png bytes>", Some("x.png")), "png", "name fallback");
+        assert_eq!(
+            guess_extension(b"<png bytes>", Some("x.png")),
+            "png",
+            "name fallback"
+        );
         assert_eq!(guess_extension(b"not an image", Some("notes.txt")), "bin");
         assert_eq!(guess_extension(b"not an image", None), "bin");
         std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
+    fn bounded_decoder_checks_header_and_memory_budget_before_decode() {
+        let (bytes, _) = encode_bitmap(&Bitmap::new_u8(2, 2, 3, vec![0; 12])).unwrap();
+        assert!(decode_bitmap_bounded(&bytes, Some("x.png"), 1, u64::MAX).is_err());
+        assert!(decode_bitmap_bounded(&bytes, Some("x.png"), 2, 63).is_err());
+        assert!(decode_bitmap_bounded(&bytes, Some("x.png"), 2, 64).is_ok());
+        assert_eq!(bitmap_decoded_cost(&bytes, Some("x.png"), 2).unwrap(), 64);
+    }
+
+    #[test]
     fn encode_bitmap_roundtrips_every_depth() {
         let cases = [
             Bitmap::new_u8(2, 1, 3, vec![1, 2, 3, 250, 251, 252]),
-            Bitmap { width: 1, height: 2, channels: 1, data: BitmapData::U16(vec![7, 65000]) },
+            Bitmap {
+                width: 1,
+                height: 2,
+                channels: 1,
+                data: BitmapData::U16(vec![7, 65000]),
+            },
             Bitmap::new_f32(1, 1, 3, vec![0.25, 2.5, -1.0]),
         ];
         for b in cases {

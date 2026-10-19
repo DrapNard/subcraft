@@ -167,6 +167,42 @@ mod launch_tests {
     }
 
     #[test]
+    fn dropped_kalium_project_preserves_unsaved_work_until_confirmation() {
+        let mut app = SubcraftApp {
+            state: UiState::new(Session::new(subcraft_mesh::primitives::cube(2.0), 64), None),
+            dock: default_layout(), frames: 0, screenshot: None, screenshot_requested: false,
+            pending_now: None, active_tabs: HashSet::new(), inspector_selection: None, test_crash: false, profile: None,
+        };
+        app.state.session.execute(Command::AddLayer(NewLayer::Paint)).unwrap();
+        let before = app.state.session.document().clone();
+        let path = PathBuf::from("artist.KALIUM");
+        let ctx = egui::Context::default();
+        let input = egui::RawInput { dropped_files: vec![egui::DroppedFile { path: Some(path.clone()), ..Default::default() }], ..Default::default() };
+        let _ = ctx.run(input, |ctx| app.dropped_project(ctx, 0.0));
+        assert_eq!(app.state.confirm, Some(Pending::OpenRecent));
+        assert_eq!(app.state.welcome.pending_recent, Some(path));
+        assert_eq!(app.state.session.document(), &before);
+        assert!(app.pending_now.is_none());
+    }
+
+    #[test]
+    fn unsaved_modal_blocks_background_tool_shortcuts() {
+        let mut app = SubcraftApp {
+            state: UiState::new(Session::new(subcraft_mesh::primitives::cube(2.0), 64), None),
+            dock: default_layout(), frames: 0, screenshot: None, screenshot_requested: false,
+            pending_now: None, active_tabs: HashSet::new(), inspector_selection: None, test_crash: false, profile: None,
+        };
+        app.state.confirm = Some(Pending::OpenProject);
+        let ctx = egui::Context::default();
+        let before = app.state.session.document().clone();
+        let input = egui::RawInput { events: vec![egui::Event::Key { key: egui::Key::E, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }], ..Default::default() };
+        let _ = ctx.run(input, |ctx| app.shortcuts(ctx));
+        assert!(matches!(app.state.tool, Tool::Brush));
+        assert_eq!(app.state.confirm, Some(Pending::OpenProject));
+        assert_eq!(app.state.session.document(), &before);
+    }
+
+    #[test]
     fn file_menu_opens_preferences_without_project_edits() {
         let mut app = SubcraftApp {
             state: UiState::new(Session::new(subcraft_mesh::primitives::cube(2.0), 64), None),
@@ -270,7 +306,7 @@ impl SubcraftApp {
     pub fn new(cc: &eframe::CreationContext<'_>, options: LaunchOptions) -> Self {
         theme::apply(&cc.egui_ctx);
         let mut status = None;
-        let is_project = |p: &std::path::Path| p.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case(subcraft_app::PROJECT_EXTENSION));
+        let is_project = |p: &std::path::Path| subcraft_app::launch::file_kind(p) == Some(subcraft_app::launch::FileKind::Project);
         #[cfg(not(target_arch = "wasm32"))]
         let resumed = options.resume_update.as_ref().and_then(|path| match subcraft_app::updater::resume_session(path) {
             Ok(session) => Some(session), Err(e) => { status = Some(format!("Could not restore update snapshot: {e}")); None }
@@ -423,8 +459,22 @@ impl SubcraftApp {
         }
     }
 
+    /// Route an OS-dropped project through the same unsaved-work confirmation
+    /// as Recent/Open. The source path remains navigation history only.
+    fn dropped_project(&mut self, ctx: &egui::Context, now: f64) {
+        if self.state.confirm.is_some() || !self.state.recovery.crashed.is_empty() || self.pending_now.is_some() {
+            return;
+        }
+        let path = ctx.input(|input| input.raw.dropped_files.iter().filter_map(|file| file.path.as_ref())
+            .find(|path| subcraft_app::launch::file_kind(path) == Some(subcraft_app::launch::FileKind::Project)).cloned());
+        if let Some(path) = path {
+            self.state.welcome.pending_recent = Some(path);
+            self.request(Pending::OpenRecent, now);
+        }
+    }
+
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if ctx.egui_wants_keyboard_input() {
+        if self.state.confirm.is_some() || !self.state.recovery.crashed.is_empty() || ctx.egui_wants_keyboard_input() {
             return;
         }
         let pressed: Vec<Shortcut> = ctx.input(|i| {
@@ -901,7 +951,9 @@ impl eframe::App for SubcraftApp {
         }
         self.state.recovery.prefs.apply_ui_size(&ctx);
         self.frames += 1;
-        crate::pen::keyboard(&mut self.state, &ctx, ctx.input(|i| i.time));
+        if self.state.confirm.is_none() && self.state.recovery.crashed.is_empty() {
+            crate::pen::keyboard(&mut self.state, &ctx, ctx.input(|i| i.time));
+        }
         self.shortcuts(&ctx);
         if ctx.input(|i| i.pointer.any_released()) {
             let _ = self.state.session.execute(Command::Seal);
@@ -947,6 +999,7 @@ impl eframe::App for SubcraftApp {
         crate::layer_previews::inspection_window(&mut self.state, &ctx);
         self.shortcuts_window(&ctx);
         let now = ctx.input(|i| i.time);
+        self.dropped_project(&ctx, now);
         crate::asset_preview::show(&mut self.state,&ctx);
         crate::pen::finish_frame(&mut self.state, &ctx, now);
         self.flush_pen_after(now);

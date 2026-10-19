@@ -11,6 +11,7 @@ pub mod history;
 pub mod layer;
 pub mod mask;
 pub mod pen;
+pub mod procedural;
 pub mod resources;
 pub mod texture_set;
 
@@ -22,5 +23,6 @@ pub use history::{History, HistoryEntry};
 pub use layer::{ChannelBlend, FillChannel, FillContent, GroupContent, Layer, LayerContent, LayerKind, PaintContent, PartMask, changed_paint_tiles, empty_paint_image, same_paint_layout};
 pub use mask::{Generator, GeneratorKind, Levels, Mask, MaskEffect, MaskEffectKind};
 pub use pen::{PenAnchor, PenPath};
+pub use procedural::{GraphEdge, GraphError, NodeKind as ProceduralNodeKind, ProceduralEvaluator, ProceduralGraph, ProceduralNode};
 pub use resources::{Resource, ResourceKind, ResourceStore};
 pub use texture_set::{ChannelDef, ChannelFormat, LayerLocation, LayerOpError, RESOLUTIONS, TextureSet};

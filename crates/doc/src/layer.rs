@@ -14,6 +14,7 @@ use crate::blend::BlendMode;
 use crate::effect::{ContentEffect, ContentEffectKind};
 use crate::fill::{FillSource, Projection};
 use crate::mask::Mask;
+use crate::procedural::ProceduralGraph;
 use crate::texture_set::TextureSet;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -37,6 +38,8 @@ pub struct PaintContent {
     pub channels: BTreeMap<ChannelKind, TiledImage>,
     /// Editable pen source; channel rasters are its derived, tiled cache.
     pub path: Option<crate::pen::PenPath>,
+    /// Optional generated Roughness source, overlaid by authored Roughness paint.
+    pub procedural_graph: Option<ProceduralGraph>,
 }
 
 impl PaintContent {
@@ -353,7 +356,10 @@ impl Layer {
         match (&self.content, &other.content) {
             // A channel image present on one side only is a raster change (absent = transparent,
             // e.g. created lazily by the first stroke) as long as it has the paint-image layout.
-            (LayerContent::Paint(a), LayerContent::Paint(b)) => same_paint_layout(&a.channels, &b.channels),
+            (LayerContent::Paint(a), LayerContent::Paint(b)) => {
+                a.procedural_graph == b.procedural_graph
+                    && same_paint_layout(&a.channels, &b.channels)
+            }
             (LayerContent::Fill(a), LayerContent::Fill(b)) => a == b,
             (LayerContent::Group(a), LayerContent::Group(b)) => {
                 a.children.len() == b.children.len() && a.children.iter().zip(&b.children).all(|(x, y)| x.id == y.id)

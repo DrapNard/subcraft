@@ -87,7 +87,7 @@ pub fn run_pending(state: &mut UiState, action: Pending, ctx: &egui::Context, _n
         Pending::NewSample => state.set_session(Session::sample()),
         // In the browser a .gltf can come with its .bin, so meshes allow several files.
         Pending::OpenMesh => crate::files::pick(ctx, crate::files::Purpose::OpenMesh, crate::files::MESHES, cfg!(target_arch = "wasm32"), None),
-        Pending::OpenProject => crate::files::pick(ctx, crate::files::Purpose::OpenProject, PROJECT_FILTER, false, None),
+        Pending::OpenProject => crate::files::pick(ctx, crate::files::Purpose::OpenProject, crate::files::PROJECTS, false, None),
         Pending::OpenRecent => {
             if let Some(path) = state.welcome.pending_recent.take() {
                 match Session::open_recent(&path) {
@@ -107,7 +107,7 @@ pub fn open_project(state: &mut UiState, path: &std::path::Path, now: f64) {
         Ok(s) => {
             state.set_session(s);
             state.welcome.remember(path);
-            state.set_status(format!("Opened {}", path.display()), now);
+            state.set_status(if state.session.project_path().is_none() { format!("Imported {} — save as a SubCraft project", path.display()) } else { format!("Opened {}", path.display()) }, now);
         }
         Err(e) => state.set_status(format!("Could not open project: {e}"), now),
     }
@@ -322,7 +322,7 @@ pub fn bake_window(state: &mut UiState, ctx: &egui::Context, now: f64) {
             egui::Grid::new("bake_grid").num_columns(2).spacing([16.0, 10.0]).show(ui, |ui| {
                 ui.label(dim("Size"));
                 egui::ComboBox::from_id_salt("bake_size").selected_text(format!("{}²", b.settings.size)).show_ui(ui, |ui| {
-                    for r in [256u32, 512, 1024, 2048, 4096] {
+                    for r in subcraft_doc::RESOLUTIONS {
                         ui.selectable_value(&mut b.settings.size, r, format!("{r}²"));
                     }
                 });

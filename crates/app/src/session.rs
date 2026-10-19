@@ -127,6 +127,8 @@ pub struct Session {
     revision: u64,
     layer_counter: u32,
     project_path: Option<PathBuf>,
+    /// Display/save suggestion for an imported source; never a write destination.
+    imported_name: Option<String>,
     /// Document as of the last save / load / new (for the unsaved-changes indicator).
     saved_doc: Document,
     /// Mesh maps changed (baked) since the last save.
@@ -205,24 +207,37 @@ impl Session {
             revision: 0,
             layer_counter,
             project_path: None,
+            imported_name: None,
             maps_dirty: false,
             maps_generation: 0,
             recovered: false,
         }
     }
 
-    /// Open a `.subcraft` project.
+    /// Open a native `.subcraft` project or import an editable `.kalium` project.
     pub fn open_project(path: &Path) -> Result<Self, String> {
         Self::open_project_labeled(path, "Open Project")
     }
 
     pub(crate) fn open_project_labeled(path: &Path, label: &str) -> Result<Self, String> {
-        let data = subcraft_project::load_project(path).map_err(|e| e.to_string())?;
+        let imported = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("kalium"));
+        let data = if imported {
+            subcraft_project::kalium::load_kalium_project(path)
+        } else {
+            subcraft_project::load_project(path)
+        }.map_err(|e| e.to_string())?;
         if data.document.texture_sets.is_empty() {
             return Err("project has no texture sets".into());
         }
         let mut s = Self::from_parts(data.mesh, data.document, data.resources, label);
-        s.project_path = Some(path.to_path_buf());
+        if imported {
+            // The source is never a native save target. Imported work is unsaved
+            // even before its first edit, so close prompts and autosave protect it.
+            s.mark_recovered(None);
+            s.imported_name = path.file_stem().and_then(|name| name.to_str()).map(str::to_string);
+        } else {
+            s.project_path = Some(path.to_path_buf());
+        }
         for (ts, maps) in data.mesh_maps {
             s.mesh_maps.insert(ts, MeshMaps::from_map(maps));
         }
@@ -1188,6 +1203,7 @@ impl Session {
             .and_then(|p| p.file_stem())
             .and_then(|s| s.to_str())
             .map(str::to_string)
+            .or_else(|| self.imported_name.clone())
             .unwrap_or_else(|| self.scene.mesh.name.clone())
     }
 

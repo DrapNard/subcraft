@@ -17,7 +17,9 @@ use subcraft_doc::{Layer, MaskEffect, MaskEffectKind, ResourceStore};
 use zip::write::SimpleFileOptions;
 
 use crate::schema::{LayerV1, MaskEffectV1, ResourceV1, SCHEMA_VERSION};
-use crate::{Loader, ProjectError, Writer, pack_resources, to_json, unpack_resources, write_payload};
+use crate::{
+    Loader, ProjectError, Writer, pack_resources, to_json, unpack_resources, write_payload,
+};
 
 pub const FRAGMENT_FORMAT: &str = "subcraft-fragment";
 pub const SMART_MATERIAL_EXTENSION: &str = "scsmart";
@@ -87,9 +89,15 @@ impl Fragment {
 }
 
 pub fn write_fragment<W: Write + Seek>(w: W, f: &Fragment) -> Result<W, ProjectError> {
-    let mut writer = Writer { rasters: Vec::new() };
+    let mut writer = Writer {
+        rasters: Vec::new(),
+    };
     let layers = f.layers.iter().map(|l| writer.layer(l)).collect();
-    let mask_effects = f.mask_effects.iter().map(|e| writer.mask_effect(e)).collect();
+    let mask_effects = f
+        .mask_effects
+        .iter()
+        .map(|e| writer.mask_effect(e))
+        .collect();
     let (resources, res_files) = pack_resources(&f.referenced_resources(), &f.resources);
     let file = FragmentFile {
         format: FRAGMENT_FORMAT.into(),
@@ -103,7 +111,10 @@ pub fn write_fragment<W: Write + Seek>(w: W, f: &Fragment) -> Result<W, ProjectE
         resources,
     };
     let mut zip = zip::ZipWriter::new(w);
-    zip.start_file("fragment.json", SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated))?;
+    zip.start_file(
+        "fragment.json",
+        SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated),
+    )?;
     zip.write_all(to_json(&file).as_bytes())?;
     write_payload(&mut zip, &writer.rasters, &res_files)?;
     Ok(zip.finish()?)
@@ -112,14 +123,17 @@ pub fn write_fragment<W: Write + Seek>(w: W, f: &Fragment) -> Result<W, ProjectE
 /// Save atomically (temp file + rename).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn save_fragment(path: &Path, f: &Fragment) -> Result<(), ProjectError> {
-    let tmp = crate::temp_path(path);
+    crate::reject_spp_save_path(path)?;
+    let (tmp, file) = crate::create_staging_file(path)?;
     let result = (|| -> Result<(), ProjectError> {
-        let file = std::fs::File::create(&tmp)?;
         let buf = write_fragment(std::io::BufWriter::new(file), f)?;
-        let file = buf.into_inner().map_err(|e| ProjectError::Io(e.into_error()))?;
+        let file = buf
+            .into_inner()
+            .map_err(|e| ProjectError::Io(e.into_error()))?;
         file.sync_all()?;
         drop(file);
-        std::fs::rename(&tmp, path)?;
+        crate::replace_file(&tmp, path)?;
+        crate::sync_parent_directory(path)?;
         Ok(())
     })();
     if result.is_err() {
@@ -131,16 +145,29 @@ pub fn save_fragment(path: &Path, f: &Fragment) -> Result<(), ProjectError> {
 /// Web build: encode in memory and hand the file to `vfs`.
 #[cfg(target_arch = "wasm32")]
 pub fn save_fragment(path: &Path, f: &Fragment) -> Result<(), ProjectError> {
+    crate::reject_spp_save_path(path)?;
     let buf = write_fragment(std::io::Cursor::new(Vec::new()), f)?;
     subcraft_core::vfs::write(path, &buf.into_inner())?;
     Ok(())
 }
 
-pub fn read_fragment<R: Read + Seek>(r: R) -> Result<Fragment, ProjectError> {
+pub fn read_fragment<R: Read + Seek>(mut r: R) -> Result<Fragment, ProjectError> {
+    let directory = crate::limits::preflight_zip_directory(&mut r)?;
+    r.seek(std::io::SeekFrom::Start(0))?;
     let mut zip = zip::ZipArchive::new(r)?;
-    let mut loader = Loader { zip: &mut zip, cache: BTreeMap::new() };
-    let json = loader.bytes("fragment.json").map_err(|_| ProjectError::NotAProject)?;
-    let file: FragmentFile = serde_json::from_slice(&json).map_err(|e| ProjectError::Invalid(format!("fragment.json: {e}")))?;
+    let mut loader = Loader {
+        zip: &mut zip,
+        directory: &directory,
+        read_budget: Default::default(),
+        raster_cost: 0,
+        cache: BTreeMap::new(),
+    };
+    let json = loader
+        .bytes("fragment.json", crate::limits::MAX_DOCUMENT_BYTES)
+        .map_err(|_| ProjectError::NotAProject)?;
+    crate::limits::preflight_json(&json)?;
+    let file: FragmentFile = serde_json::from_slice(&json)
+        .map_err(|e| ProjectError::Invalid(format!("fragment.json: {e}")))?;
     if file.format != FRAGMENT_FORMAT {
         return Err(ProjectError::NotAProject);
     }
@@ -148,12 +175,30 @@ pub fn read_fragment<R: Read + Seek>(r: R) -> Result<Fragment, ProjectError> {
         return Err(ProjectError::UnsupportedVersion(file.schema_version));
     }
     if !subcraft_doc::RESOLUTIONS.contains(&file.resolution) {
-        return Err(ProjectError::Invalid(format!("unsupported resolution {}", file.resolution)));
+        return Err(ProjectError::Invalid(format!(
+            "unsupported resolution {}",
+            file.resolution
+        )));
     }
-    let layers = file.layers.iter().map(|l| loader.layer(l, file.resolution)).collect::<Result<Vec<_>, _>>()?;
-    let mask_effects = file.mask_effects.iter().map(|e| loader.mask_effect(e, file.resolution)).collect::<Result<Vec<_>, _>>()?;
+    let layers = file
+        .layers
+        .iter()
+        .map(|l| loader.layer(l, file.resolution))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mask_effects = file
+        .mask_effects
+        .iter()
+        .map(|e| loader.mask_effect(e, file.resolution))
+        .collect::<Result<Vec<_>, _>>()?;
     let resources = unpack_resources(&mut loader, &file.resources)?;
-    Ok(Fragment { kind: file.kind, name: file.name, resolution: file.resolution, layers, mask_effects, resources })
+    Ok(Fragment {
+        kind: file.kind,
+        name: file.name,
+        resolution: file.resolution,
+        layers,
+        mask_effects,
+        resources,
+    })
 }
 
 pub fn load_fragment(path: &Path) -> Result<Fragment, ProjectError> {
@@ -169,12 +214,16 @@ mod tests {
     use std::sync::Arc;
 
     use subcraft_core::{ChannelKind, ResourceId};
-    use subcraft_doc::{Generator, GeneratorKind, LayerContent, Mask, Projection, Resource, ResourceKind, TextureSet};
+    use subcraft_doc::{
+        Generator, GeneratorKind, LayerContent, Mask, Projection, Resource, ResourceKind,
+        TextureSet,
+    };
 
     use super::*;
 
     fn png_bytes() -> Vec<u8> {
-        let b = subcraft_image::Bitmap::new_u8(2, 2, 3, vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 9, 9]);
+        let b =
+            subcraft_image::Bitmap::new_u8(2, 2, 3, vec![255, 0, 0, 0, 255, 0, 0, 0, 255, 9, 9, 9]);
         subcraft_image::encode_bitmap(&b).unwrap().0
     }
 
@@ -185,12 +234,21 @@ mod tests {
         let mut folder = Layer::new_folder("Painted Metal", &tc);
         let mut paint = Layer::new_paint("Scratches", &tc);
         if let LayerContent::Paint(p) = &mut paint.content {
-            p.channel_mut(ChannelKind::Roughness, 256).set(10, 10, [0.9, 1.0, 0.0, 0.0]);
+            p.channel_mut(ChannelKind::Roughness, 256)
+                .set(10, 10, [0.9, 1.0, 0.0, 0.0]);
         }
         let img = ResourceId::new();
         let mut mask = Mask::new(256, false);
-        mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Generator(Generator::new(GeneratorKind::Edges)))));
-        mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Image { resource: img, projection: Projection::default(), invert: false })));
+        mask.effects
+            .push(Arc::new(MaskEffect::new(MaskEffectKind::Generator(
+                Generator::new(GeneratorKind::Edges),
+            ))));
+        mask.effects
+            .push(Arc::new(MaskEffect::new(MaskEffectKind::Image {
+                resource: img,
+                projection: Projection::default(),
+                invert: false,
+            })));
         paint.mask = Some(mask);
         if let LayerContent::Group(g) = &mut folder.content {
             g.children.push(Arc::new(paint));
@@ -225,21 +283,36 @@ mod tests {
             mask_effects: Vec::new(),
             resources,
         };
-        let buf = write_fragment(Cursor::new(Vec::new()), &f).unwrap().into_inner();
+        let buf = write_fragment(Cursor::new(Vec::new()), &f)
+            .unwrap()
+            .into_inner();
         let back = read_fragment(Cursor::new(buf)).unwrap();
         assert_eq!(back.kind, FragmentKind::SmartMaterial);
         assert_eq!(back.name, "Painted Metal");
         assert_eq!(back.resolution, 256);
-        assert_eq!(back.layers, vec![folder], "layer tree, rasters and mask round-trip exactly");
-        assert!(back.resources.get(img).is_some(), "image travels with the smart material");
-        assert!(back.resources.get(unused).is_none(), "only referenced images are stored");
+        assert_eq!(
+            back.layers,
+            vec![folder],
+            "layer tree, rasters and mask round-trip exactly"
+        );
+        assert!(
+            back.resources.get(img).is_some(),
+            "image travels with the smart material"
+        );
+        assert!(
+            back.resources.get(unused).is_none(),
+            "only referenced images are stored"
+        );
     }
 
     #[test]
     fn smart_mask_roundtrip_and_rejections() {
         let mut g = Generator::new(GeneratorKind::Cavity);
         g.level = 0.3;
-        let effects = vec![MaskEffect::new(MaskEffectKind::Generator(g)), MaskEffect::new(MaskEffectKind::Invert)];
+        let effects = vec![
+            MaskEffect::new(MaskEffectKind::Generator(g)),
+            MaskEffect::new(MaskEffectKind::Invert),
+        ];
         let f = Fragment {
             kind: FragmentKind::SmartMask,
             name: "Dirt".into(),
@@ -248,12 +321,16 @@ mod tests {
             mask_effects: effects.clone(),
             resources: ResourceStore::default(),
         };
-        let buf = write_fragment(Cursor::new(Vec::new()), &f).unwrap().into_inner();
+        let buf = write_fragment(Cursor::new(Vec::new()), &f)
+            .unwrap()
+            .into_inner();
         let back = read_fragment(Cursor::new(buf)).unwrap();
         assert_eq!(back.mask_effects, effects);
 
         // A project file is not a fragment; garbage is an error, not a panic.
-        let doc = subcraft_doc::Document { texture_sets: vec![TextureSet::new("T", 0, 128)] };
+        let doc = subcraft_doc::Document {
+            texture_sets: vec![TextureSet::new("T", 0, 128)],
+        };
         let project = crate::write_project(
             Cursor::new(Vec::new()),
             &subcraft_mesh::primitives::cube(1.0),
@@ -263,7 +340,10 @@ mod tests {
         )
         .unwrap()
         .into_inner();
-        assert!(matches!(read_fragment(Cursor::new(project)), Err(ProjectError::NotAProject)));
+        assert!(matches!(
+            read_fragment(Cursor::new(project)),
+            Err(ProjectError::NotAProject)
+        ));
         assert!(read_fragment(Cursor::new(b"nope".to_vec())).is_err());
     }
 }

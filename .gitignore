@@ -3,3 +3,10 @@
 /scratch
 /preview_out
 /dist
+
+# Private interoperability fixtures and atomic project staging
+*.spp
+*.subcraft.saving-*
+
+__pycache__/
+*.pyc

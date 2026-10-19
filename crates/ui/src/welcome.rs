@@ -95,14 +95,14 @@ pub fn show(state: &mut UiState, ctx: &egui::Context) -> Option<WelcomeAction> {
             ui.label(subcraft_app::launch::INDEPENDENCE_NOTICE);
             ui.add_space(12.0);
             ui.label(RichText::new("Licensed under MIT or Apache-2.0.").color(theme::TEXT_DIM));
-            ui.hyperlink_to("SubCraft on GitHub", "https://github.com/Aalzard/subcraft");
+            ui.hyperlink_to("SubCraft on GitHub", "https://github.com/DrapNard/subcraft");
         });
     }
     if state.welcome.whats_new {
         egui::Window::new("What's new").open(&mut state.welcome.whats_new).collapsible(false).default_width(420.0).show(ctx, |ui| {
             ui.heading(format!("SubCraft {}",env!("CARGO_PKG_VERSION")));
             for text in ["Import textures… turns a texture's maps into one material, ambient occlusion included.", "3D View toolbar: resolution, anti-aliasing, orthographic camera and single-channel views.", "Texture Sets → Resolution: paint at a lower size for speed, raise it before exporting.", "Blend mode and opacity right in each layer row.", "The brush keeps painting where it overlaps a model's edge; no more orange hover tint.", "SubCraft tells you when a new update is out (Edit → Preferences to turn it off).", "Projects saved in this version need SubCraft 0.1.5 or newer; older projects still open."] { ui.label(text); ui.add_space(6.0); }
-            ui.hyperlink_to("Full changelog", "https://github.com/Aalzard/subcraft/blob/main/CHANGELOG.md");
+            ui.hyperlink_to("Full changelog", "https://github.com/DrapNard/subcraft/blob/main/CHANGELOG.md");
         });
     }
     action

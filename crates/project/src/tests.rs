@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use subcraft_core::{ChannelKind, ChannelValue};
 use subcraft_doc::{
-    BlendMode, Document, FillChannel, FillSource, Generator, GeneratorKind, Layer, LayerContent, Levels, Mask, MaskEffect, MaskEffectKind,
-    ProceduralKind, ProceduralParams, ResourceStore, TextureSet,
+    BlendMode, Document, FillChannel, FillSource, Generator, GeneratorKind, Layer, LayerContent,
+    Levels, Mask, MaskEffect, MaskEffectKind, ProceduralKind, ProceduralParams, ResourceStore,
+    TextureSet,
 };
 use subcraft_image::TiledImage;
 use subcraft_mesh::primitives;
@@ -20,24 +21,77 @@ fn legacy_paint_schema_defaults_to_raster_only() {
 #[test]
 fn pen_schema_has_explicit_stable_fields_and_rejects_duplicate_anchors() {
     let id = uuid::Uuid::new_v4();
-    let path = PenPathV4 { anchors: vec![PenAnchorV4 { id, position: [0.2, 0.3], incoming: [0.0, -0.1], outgoing: [0.0, 0.1] }], closed: false, radius: 0.02, hardness: 0.5, opacity: 1.0, values: vec![PenChannelV4 { channel: ChannelKind::BaseColor, value: [1.0, 0.0, 0.0] }] };
+    let path = PenPathV4 {
+        anchors: vec![PenAnchorV4 {
+            id,
+            position: [0.2, 0.3],
+            incoming: [0.0, -0.1],
+            outgoing: [0.0, 0.1],
+        }],
+        closed: false,
+        radius: 0.02,
+        hardness: 0.5,
+        opacity: 1.0,
+        values: vec![PenChannelV4 {
+            channel: ChannelKind::BaseColor,
+            value: [1.0, 0.0, 0.0],
+        }],
+    };
     let json = serde_json::to_value(&path).unwrap();
-    assert_eq!(json["anchors"][0]["id"], id.to_string()); assert_eq!(json["anchors"][0]["outgoing"], serde_json::json!([0.0, 0.1f32]));
+    assert_eq!(json["anchors"][0]["id"], id.to_string());
+    assert_eq!(
+        json["anchors"][0]["outgoing"],
+        serde_json::json!([0.0, 0.1f32])
+    );
     assert_eq!(json["values"][0]["channel"], "base_color");
     let mut layer = Layer::new_paint("Pen", &TextureSet::new("Body", 0, 128));
-    let LayerContent::Paint(p) = &mut layer.content else { panic!() };
-    let mut source = subcraft_doc::PenPath { anchors: vec![subcraft_doc::PenAnchor { id: subcraft_core::AnchorId(id), position: [0.2, 0.3].into(), incoming: [0.0, -0.1].into(), outgoing: [0.0, 0.1].into() }], closed: false, radius: 0.02, hardness: 0.5, opacity: 1.0, values: [(ChannelKind::BaseColor, ChannelValue::rgb(1.0, 0.0, 0.0))].into() };
-    source.anchors.push(source.anchors[0].clone()); p.path = Some(source);
-    let mut ts = TextureSet::new("Body", 0, 128); ts.insert_above(None, layer);
-    let bytes = write_project(Cursor::new(Vec::new()), &primitives::cube(2.0), &Document { texture_sets: vec![ts] }, &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
-    assert!(matches!(read_project(Cursor::new(bytes)), Err(ProjectError::Invalid(_))));
+    let LayerContent::Paint(p) = &mut layer.content else {
+        panic!()
+    };
+    let mut source = subcraft_doc::PenPath {
+        anchors: vec![subcraft_doc::PenAnchor {
+            id: subcraft_core::AnchorId(id),
+            position: [0.2, 0.3].into(),
+            incoming: [0.0, -0.1].into(),
+            outgoing: [0.0, 0.1].into(),
+        }],
+        closed: false,
+        radius: 0.02,
+        hardness: 0.5,
+        opacity: 1.0,
+        values: [(ChannelKind::BaseColor, ChannelValue::rgb(1.0, 0.0, 0.0))].into(),
+    };
+    source.anchors.push(source.anchors[0].clone());
+    p.path = Some(source);
+    let mut ts = TextureSet::new("Body", 0, 128);
+    ts.insert_above(None, layer);
+    let bytes = write_project(
+        Cursor::new(Vec::new()),
+        &primitives::cube(2.0),
+        &Document {
+            texture_sets: vec![ts],
+        },
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
+    assert!(matches!(
+        read_project(Cursor::new(bytes)),
+        Err(ProjectError::Invalid(_))
+    ));
 }
 
 #[test]
 fn old_part_masks_default_to_connected_and_new_domains_have_stable_names() {
     let parts: PartsV1 = serde_json::from_str(r#"{"enabled":true,"parts":[0,2]}"#).unwrap();
     assert_eq!(parts.kind, subcraft_core::PartKind::Connected);
-    for (kind, name) in subcraft_core::PartKind::ALL.into_iter().zip(["connected", "uv_island", "object", "material"]) {
+    for (kind, name) in subcraft_core::PartKind::ALL.into_iter().zip([
+        "connected",
+        "uv_island",
+        "object",
+        "material",
+    ]) {
         assert_eq!(serde_json::to_string(&kind).unwrap(), format!("\"{name}\""));
     }
 }
@@ -65,30 +119,56 @@ fn rich_document() -> Document {
     mask.base.set(3, 4, [0.75; 4]);
     let mut paint_fx = TiledImage::new(128, 128, 2, [0.0; 4]);
     paint_fx.set(100, 100, [1.0, 1.0, 0.0, 0.0]);
-    mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Paint { image: paint_fx })));
-    mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Generator(Generator::new(GeneratorKind::Cavity)))));
-    mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Levels(Levels { gamma: 2.0, ..Levels::default() }))));
-    mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Invert)));
+    mask.effects
+        .push(Arc::new(MaskEffect::new(MaskEffectKind::Paint {
+            image: paint_fx,
+        })));
+    mask.effects
+        .push(Arc::new(MaskEffect::new(MaskEffectKind::Generator(
+            Generator::new(GeneratorKind::Cavity),
+        ))));
+    mask.effects
+        .push(Arc::new(MaskEffect::new(MaskEffectKind::Levels(Levels {
+            gamma: 2.0,
+            ..Levels::default()
+        }))));
+    mask.effects
+        .push(Arc::new(MaskEffect::new(MaskEffectKind::Invert)));
     fill.mask = Some(mask);
     ts.insert_above(None, fill);
     // Folder with a painted layer.
     let folder = ts.insert_above(None, Layer::new_folder("Folder", &tc));
     let mut paint = Layer::new_paint("Paint", &tc);
     paint.blend.get_mut(&ChannelKind::BaseColor).unwrap().mode = BlendMode::Multiply;
-    paint.blend.get_mut(&ChannelKind::Roughness).unwrap().opacity = 0.4;
+    paint
+        .blend
+        .get_mut(&ChannelKind::Roughness)
+        .unwrap()
+        .opacity = 0.4;
     paint.visible = false;
     if let LayerContent::Paint(p) = &mut paint.content {
-        p.channel_mut(ChannelKind::BaseColor, 128).set(70, 7, [0.2, 0.4, 0.6, 0.5]);
-        p.channel_mut(ChannelKind::Height, 128).set(1, 120, [-0.25, 1.0, 0.0, 0.0]);
+        p.channel_mut(ChannelKind::BaseColor, 128)
+            .set(70, 7, [0.2, 0.4, 0.6, 0.5]);
+        p.channel_mut(ChannelKind::Height, 128)
+            .set(1, 120, [-0.25, 1.0, 0.0, 0.0]);
     }
     ts.insert(Some(folder), 0, paint).unwrap();
     let trim = TextureSet::new("Trim", 1, 256);
-    Document { texture_sets: vec![ts, trim] }
+    Document {
+        texture_sets: vec![ts, trim],
+    }
 }
 
 fn roundtrip(doc: &Document) -> ProjectData {
     let mesh = primitives::sample_crate();
-    let buf = write_project(Cursor::new(Vec::new()), &mesh, doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap();
+    let buf = write_project(
+        Cursor::new(Vec::new()),
+        &mesh,
+        doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap();
     read_project(Cursor::new(buf.into_inner())).unwrap()
 }
 
@@ -96,7 +176,10 @@ fn roundtrip(doc: &Document) -> ProjectData {
 fn document_roundtrips_exactly() {
     let doc = rich_document();
     let back = roundtrip(&doc);
-    assert_eq!(back.document, doc, "layer tree, ids, blends, masks, effects and rasters survive");
+    assert_eq!(
+        back.document, doc,
+        "layer tree, ids, blends, masks, effects and rasters survive"
+    );
     assert_eq!(back.mesh.positions, primitives::sample_crate().positions);
     assert_eq!(back.mesh.materials.len(), 2);
 }
@@ -109,10 +192,20 @@ fn baked_mesh_maps_roundtrip() {
     ao.set(10, 10, [0.25; 4]);
     let mut inner = std::collections::BTreeMap::new();
     inner.insert(subcraft_core::MeshMapKind::AmbientOcclusion, ao);
-    inner.insert(subcraft_core::MeshMapKind::WorldSpaceNormal, TiledImage::new(256, 256, 3, [0.5, 1.0, 0.5, 0.0]));
+    inner.insert(
+        subcraft_core::MeshMapKind::WorldSpaceNormal,
+        TiledImage::new(256, 256, 3, [0.5, 1.0, 0.5, 0.0]),
+    );
     maps.insert(doc.texture_sets[0].id, inner);
     let mesh = primitives::sample_crate();
-    let buf = write_project(Cursor::new(Vec::new()), &mesh, &doc, &ResourceStore::default(), &maps).unwrap();
+    let buf = write_project(
+        Cursor::new(Vec::new()),
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &maps,
+    )
+    .unwrap();
     let back = read_project(Cursor::new(buf.into_inner())).unwrap();
     assert_eq!(back.mesh_maps, maps);
     assert_eq!(back.document, doc);
@@ -125,35 +218,177 @@ fn file_save_is_atomic_and_overwrites() {
     let path = dir.join("crate.subcraft");
     let mesh = primitives::sample_crate();
     let mut doc = rich_document();
-    save_project(&path, &mesh, &doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap();
+    save_project(
+        &path,
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap();
     doc.texture_sets[0].name = "Renamed".into();
-    save_project(&path, &mesh, &doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap();
-    assert!(!temp_path(&path).exists(), "temporary file cleaned up");
+    save_project(
+        &path,
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap();
+    assert!(
+        std::fs::read_dir(&dir).unwrap().all(|entry| !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".saving")),
+        "staging file cleaned up"
+    );
     let back = load_project(&path).unwrap();
     assert_eq!(back.document.texture_sets[0].name, "Renamed");
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]
+fn staging_files_are_unique_and_failed_replace_preserves_existing_target() {
+    let dir = std::env::temp_dir().join(format!("subcraft-save-safety-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("target.subcraft");
+    std::fs::write(&target, b"artist data").unwrap();
+    let (first, first_file) = create_staging_file(&target).unwrap();
+    let (second, second_file) = create_staging_file(&target).unwrap();
+    assert_ne!(first, second);
+    drop((first_file, second_file));
+    std::fs::remove_file(&first).unwrap();
+    std::fs::remove_file(&second).unwrap();
+
+    // A directory cannot be atomically replaced by the staged project. The old directory and
+    // its contents remain in place and the failed staging file is cleaned up.
+    let blocked = dir.join("blocked.subcraft");
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::write(blocked.join("keep.txt"), b"preserve").unwrap();
+    let result = save_project(
+        &blocked,
+        &primitives::cube(1.0),
+        &Document::default(),
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    );
+    assert!(result.is_err());
+    assert_eq!(
+        std::fs::read(blocked.join("keep.txt")).unwrap(),
+        b"preserve"
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"artist data");
+    assert!(std::fs::read_dir(&dir).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".saving")
+    }));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn spp_save_is_rejected_before_existing_file_changes() {
+    let dir = std::env::temp_dir().join(format!("subcraft-spp-save-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Project.SPP");
+    std::fs::write(&path, b"preserve unsupported format").unwrap();
+    let result = save_project(
+        &path,
+        &primitives::cube(1.0),
+        &Document::default(),
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    );
+    assert!(
+        matches!(result, Err(ProjectError::Invalid(message)) if message.contains(".spp export is not implemented"))
+    );
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        b"preserve unsupported format"
+    );
+    assert!(std::fs::read_dir(&dir).unwrap().all(|entry| {
+        !entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .ends_with(".saving")
+    }));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn spp_load_is_rejected_without_touching_source_file() {
+    let dir = std::env::temp_dir().join(format!("subcraft-spp-load-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("Painter.SPP");
+    let original = b"not treated as a SubCraft ZIP project";
+    std::fs::write(&path, original).unwrap();
+    let result = load_project(&path);
+    assert!(
+        matches!(result, Err(ProjectError::Invalid(message)) if message.contains(".spp import is not implemented"))
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn project_loader_rejects_unsafe_zip_paths_before_archive_loading() {
+    let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    zip.start_file("../outside", SimpleFileOptions::default())
+        .unwrap();
+    zip.write_all(b"no").unwrap();
+    let bytes = zip.finish().unwrap().into_inner();
+    assert!(matches!(
+        read_project(Cursor::new(bytes)),
+        Err(ProjectError::Invalid(_))
+    ));
+}
+
+#[test]
 fn rejects_newer_schema_and_non_projects() {
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    zip.start_file("manifest.json", SimpleFileOptions::default()).unwrap();
+    zip.start_file("manifest.json", SimpleFileOptions::default())
+        .unwrap();
     zip.write_all(br#"{"format":"subcraft-project","schema_version":99,"writer":"x","mesh":"m","document":"d"}"#).unwrap();
     let bytes = zip.finish().unwrap().into_inner();
-    assert!(matches!(read_project(Cursor::new(bytes)), Err(ProjectError::UnsupportedVersion(99))));
+    assert!(matches!(
+        read_project(Cursor::new(bytes)),
+        Err(ProjectError::UnsupportedVersion(99))
+    ));
 
     let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    zip.start_file("readme.txt", SimpleFileOptions::default()).unwrap();
+    zip.start_file("readme.txt", SimpleFileOptions::default())
+        .unwrap();
     let bytes = zip.finish().unwrap().into_inner();
-    assert!(matches!(read_project(Cursor::new(bytes)), Err(ProjectError::NotAProject)));
-    assert!(matches!(read_project(Cursor::new(b"definitely not a zip".to_vec())), Err(ProjectError::Container(_))));
+    assert!(matches!(
+        read_project(Cursor::new(bytes)),
+        Err(ProjectError::NotAProject)
+    ));
+    assert!(matches!(
+        read_project(Cursor::new(b"definitely not a zip".to_vec())),
+        Err(ProjectError::Container(_) | ProjectError::Invalid(_))
+    ));
 }
 
 #[test]
 fn corrupt_raster_is_an_error_not_a_panic() {
     let doc = rich_document();
     let mesh = primitives::sample_crate();
-    let good = write_project(Cursor::new(Vec::new()), &mesh, &doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
+    let good = write_project(
+        Cursor::new(Vec::new()),
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
     // Rebuild the container with one raster truncated.
     let mut src = zip::ZipArchive::new(Cursor::new(good)).unwrap();
     let mut out = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -170,7 +405,10 @@ fn corrupt_raster_is_an_error_not_a_panic() {
     }
     let bytes = out.finish().unwrap().into_inner();
     let err = read_project(Cursor::new(bytes)).unwrap_err();
-    assert!(matches!(err, ProjectError::Invalid(ref m) if m.contains("truncated")), "{err}");
+    assert!(
+        matches!(err, ProjectError::Invalid(ref m) if m.contains("truncated")),
+        "{err}"
+    );
 }
 
 /// Pins the JSON of value types embedded in the schema: changing them is a format change.
@@ -185,8 +423,14 @@ fn embedded_value_types_have_stable_json() {
         serde_json::to_string(&src).unwrap(),
         r#"{"type":"procedural","params":{"kind":"wood_rings","scale":4.0,"seed":1,"balance":0.5,"contrast":0.0,"invert":false},"low":[0.0,0.0,0.0],"high":[1.0,0.5,0.25]}"#
     );
-    assert_eq!(serde_json::to_string(&BlendMode::NormalMapCombine).unwrap(), r#""normal_map_combine""#);
-    assert_eq!(serde_json::to_string(&ChannelKind::AmbientOcclusion).unwrap(), r#""ambient_occlusion""#);
+    assert_eq!(
+        serde_json::to_string(&BlendMode::NormalMapCombine).unwrap(),
+        r#""normal_map_combine""#
+    );
+    assert_eq!(
+        serde_json::to_string(&ChannelKind::AmbientOcclusion).unwrap(),
+        r#""ambient_occlusion""#
+    );
     let p = subcraft_doc::Projection::default();
     assert_eq!(
         serde_json::to_string(&p).unwrap(),
@@ -216,8 +460,21 @@ fn with_manifest(bytes: Vec<u8>, f: impl Fn(String) -> String) -> Vec<u8> {
 fn schema_1_projects_still_load() {
     let doc = rich_document();
     let mesh = primitives::sample_crate();
-    let bytes = write_project(Cursor::new(Vec::new()), &mesh, &doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
-    let v1 = with_manifest(bytes, |m| m.replace(&format!("\"schema_version\": {SCHEMA_VERSION}"), "\"schema_version\": 1"));
+    let bytes = write_project(
+        Cursor::new(Vec::new()),
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
+    let v1 = with_manifest(bytes, |m| {
+        m.replace(
+            &format!("\"schema_version\": {SCHEMA_VERSION}"),
+            "\"schema_version\": 1",
+        )
+    });
     let back = read_project(Cursor::new(v1)).unwrap();
     assert_eq!(back.document, doc);
 }
@@ -231,7 +488,15 @@ fn image_mask_effect_keeps_its_image() {
         let dir = std::env::temp_dir().join(format!("subcraft-proj-img-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("logo.png");
-        subcraft_image::save_image(&p, 2, 2, 2, &[0.0, 0.0, 1.0, 1.0, 1.0, 0.5, 0.0, 1.0], subcraft_image::FileFormat::Png8).unwrap();
+        subcraft_image::save_image(
+            &p,
+            2,
+            2,
+            2,
+            &[0.0, 0.0, 1.0, 1.0, 1.0, 0.5, 0.0, 1.0],
+            subcraft_image::FileFormat::Png8,
+        )
+        .unwrap();
         let b = std::fs::read(&p).unwrap();
         std::fs::remove_dir_all(&dir).ok();
         b
@@ -251,15 +516,33 @@ fn image_mask_effect_keeps_its_image() {
     let mut mask = Mask::new(128, false);
     let mut projection = Projection::default();
     projection.scale = [3.0, 3.0];
-    mask.effects.push(Arc::new(MaskEffect::new(MaskEffectKind::Image { resource: id, projection, invert: true })));
+    mask.effects
+        .push(Arc::new(MaskEffect::new(MaskEffectKind::Image {
+            resource: id,
+            projection,
+            invert: true,
+        })));
     layer.mask = Some(mask);
     ts.insert_above(None, layer);
-    let doc = Document { texture_sets: vec![ts] };
+    let doc = Document {
+        texture_sets: vec![ts],
+    };
 
-    let bytes = write_project(Cursor::new(Vec::new()), &primitives::cube(1.0), &doc, &res, &MeshMapSet::new()).unwrap().into_inner();
+    let bytes = write_project(
+        Cursor::new(Vec::new()),
+        &primitives::cube(1.0),
+        &doc,
+        &res,
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
     let back = read_project(Cursor::new(bytes)).unwrap();
     assert_eq!(back.document, doc);
-    let r = back.resources.get(id).expect("mask image saved with the project");
+    let r = back
+        .resources
+        .get(id)
+        .expect("mask image saved with the project");
     assert_eq!((r.bitmap.width, r.bitmap.channels), (2, 2));
 }
 
@@ -273,31 +556,68 @@ fn effect_document() -> Document {
     img.set(9, 90, [0.25, 0.5, 0.75, 0.5]);
     paint.insert(ChannelKind::BaseColor, img);
     let mut fx_paint = ContentEffect::new(ContentEffectKind::Paint { channels: paint }, &tc);
-    fx_paint.blend.get_mut(&ChannelKind::BaseColor).unwrap().opacity = 0.3;
+    fx_paint
+        .blend
+        .get_mut(&ChannelKind::BaseColor)
+        .unwrap()
+        .opacity = 0.3;
     let fill = FillContent {
         projection: subcraft_doc::Projection::default(),
-        channels: [(ChannelKind::Roughness, FillChannel::new(FillSource::uniform(ChannelValue::scalar(0.8))))].into(),
+        channels: [(
+            ChannelKind::Roughness,
+            FillChannel::new(FillSource::uniform(ChannelValue::scalar(0.8))),
+        )]
+        .into(),
     };
     let mut fx_fill = ContentEffect::new(ContentEffectKind::Fill(fill), &tc);
     fx_fill.visible = false;
     fx_fill.name = "Rough coat".into();
-    let fx_levels = ContentEffect::new(ContentEffectKind::Levels { channel: ChannelKind::Roughness, levels: Levels { out_low: 0.2, ..Levels::default() } }, &tc);
+    let fx_levels = ContentEffect::new(
+        ContentEffectKind::Levels {
+            channel: ChannelKind::Roughness,
+            levels: Levels {
+                out_low: 0.2,
+                ..Levels::default()
+            },
+        },
+        &tc,
+    );
     layer.content_effects = vec![Arc::new(fx_paint), Arc::new(fx_fill), Arc::new(fx_levels)];
     ts.insert_above(None, layer);
-    Document { texture_sets: vec![ts] }
+    Document {
+        texture_sets: vec![ts],
+    }
 }
 
 #[test]
-fn content_effects_roundtrip_exactly_with_schema_5() {
+fn content_effects_roundtrip_exactly_with_current_schema() {
     let doc = effect_document();
     let mesh = primitives::sample_crate();
-    let bytes = write_project(Cursor::new(Vec::new()), &mesh, &doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
+    let bytes = write_project(
+        Cursor::new(Vec::new()),
+        &mesh,
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
     let mut zip = zip::ZipArchive::new(Cursor::new(bytes.clone())).unwrap();
     let mut json = String::new();
-    zip.by_name("document.json").unwrap().read_to_string(&mut json).unwrap();
-    assert!(json.contains("\"content_effects\"") && json.contains("\"type\": \"levels\""), "{json}");
-    assert_eq!(SCHEMA_VERSION, 5);
-    assert_eq!(read_project(Cursor::new(bytes)).unwrap().document, doc, "effect ids, order, blends, rasters survive");
+    zip.by_name("document.json")
+        .unwrap()
+        .read_to_string(&mut json)
+        .unwrap();
+    assert!(
+        json.contains("\"content_effects\"") && json.contains("\"type\": \"levels\""),
+        "{json}"
+    );
+    assert_eq!(SCHEMA_VERSION, 6);
+    assert_eq!(
+        read_project(Cursor::new(bytes)).unwrap().document,
+        doc,
+        "effect ids, order, blends, rasters survive"
+    );
 }
 
 #[test]
@@ -313,13 +633,28 @@ fn schema_4_layers_have_no_content_effects_and_bad_effects_are_rejected() {
     assert!(!plain.contains("content_effects"));
 
     let mesh = primitives::sample_crate();
-    let save = |doc: &Document| write_project(Cursor::new(Vec::new()), &mesh, doc, &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
+    let save = |doc: &Document| {
+        write_project(
+            Cursor::new(Vec::new()),
+            &mesh,
+            doc,
+            &ResourceStore::default(),
+            &MeshMapSet::new(),
+        )
+        .unwrap()
+        .into_inner()
+    };
     // Levels on the normal channel is invalid data, not something to evaluate.
     let mut doc = effect_document();
     let layer = Arc::make_mut(&mut doc.texture_sets[0].layers[0]);
-    Arc::make_mut(&mut layer.content_effects[2]).kind =
-        subcraft_doc::ContentEffectKind::Levels { channel: ChannelKind::Normal, levels: Levels::default() };
-    assert!(matches!(read_project(Cursor::new(save(&doc))), Err(ProjectError::Invalid(_))));
+    Arc::make_mut(&mut layer.content_effects[2]).kind = subcraft_doc::ContentEffectKind::Levels {
+        channel: ChannelKind::Normal,
+        levels: Levels::default(),
+    };
+    assert!(matches!(
+        read_project(Cursor::new(save(&doc))),
+        Err(ProjectError::Invalid(_))
+    ));
     // Folders cannot carry content effects yet.
     let mut doc = effect_document();
     let effects = doc.texture_sets[0].layers[0].content_effects.clone();
@@ -327,16 +662,53 @@ fn schema_4_layers_have_no_content_effects_and_bad_effects_are_rejected() {
     let mut folder = Layer::new_folder("F", &tc);
     folder.content_effects = effects;
     doc.texture_sets[0].insert_above(None, folder);
-    assert!(matches!(read_project(Cursor::new(save(&doc))), Err(ProjectError::Invalid(_))));
+    assert!(matches!(
+        read_project(Cursor::new(save(&doc))),
+        Err(ProjectError::Invalid(_))
+    ));
 }
 
 #[test]
 fn content_effect_kinds_have_stable_json() {
-    let levels = ContentEffectKindV5::Levels { channel: ChannelKind::Roughness, levels: Levels::default() };
+    let levels = ContentEffectKindV5::Levels {
+        channel: ChannelKind::Roughness,
+        levels: Levels::default(),
+    };
     assert_eq!(
         serde_json::to_string(&levels).unwrap(),
         r#"{"type":"levels","channel":"roughness","levels":{"in_low":0.0,"in_high":1.0,"gamma":1.0,"out_low":0.0,"out_high":1.0}}"#
     );
-    let paint = ContentEffectKindV5::Paint { channels: vec![PaintChannelV1 { channel: ChannelKind::BaseColor, raster: "r".into() }] };
-    assert_eq!(serde_json::to_string(&paint).unwrap(), r#"{"type":"paint","channels":[{"channel":"base_color","raster":"r"}]}"#);
+    let paint = ContentEffectKindV5::Paint {
+        channels: vec![PaintChannelV1 {
+            channel: ChannelKind::BaseColor,
+            raster: "r".into(),
+        }],
+    };
+    assert_eq!(
+        serde_json::to_string(&paint).unwrap(),
+        r#"{"type":"paint","channels":[{"channel":"base_color","raster":"r"}]}"#
+    );
+}
+
+#[test]
+fn procedural_roughness_graph_preserves_stable_source_reference_after_save() {
+    let mut set = TextureSet::new("Graph", 0, 64);
+    let mut source = Layer::new_paint("Raw AO", &set);
+    let source_id = source.id;
+    let LayerContent::Paint(paint) = &mut source.content else { panic!() };
+    paint.channels.insert(ChannelKind::AmbientOcclusion, TiledImage::new(64, 64, 2, [0.25, 1.0, 0.0, 0.0]));
+    let mut target = Layer::new_paint("Generated Roughness", &set);
+    let graph = subcraft_doc::ProceduralGraph::value_noise_times_occlusion(42, 8.0, source_id);
+    let LayerContent::Paint(paint) = &mut target.content else { panic!() };
+    paint.procedural_graph = Some(graph.clone());
+    set.insert_above(None, source);
+    set.insert_above(None, target);
+    let doc = Document { texture_sets: vec![set] };
+    let saved = write_project(Cursor::new(Vec::new()), &primitives::cube(1.0), &doc,
+        &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
+    let reopened = read_project(Cursor::new(saved)).unwrap();
+    assert_eq!(reopened.document, doc);
+    let LayerContent::Paint(paint) = &reopened.document.texture_sets[0].layers[1].content else { panic!() };
+    assert_eq!(paint.procedural_graph.as_ref().unwrap().occlusion_source_layer_id(), Some(source_id));
+    assert_eq!(paint.procedural_graph.as_ref().unwrap(), &graph);
 }

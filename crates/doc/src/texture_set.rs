@@ -40,7 +40,9 @@ pub struct ChannelDef {
 impl ChannelDef {
     pub fn default_for(kind: ChannelKind) -> Self {
         let format = match kind {
-            ChannelKind::BaseColor | ChannelKind::Roughness | ChannelKind::Metallic => ChannelFormat::Bit8,
+            ChannelKind::BaseColor | ChannelKind::Roughness | ChannelKind::Metallic => {
+                ChannelFormat::Bit8
+            }
             ChannelKind::Height | ChannelKind::Normal => ChannelFormat::Float16,
             _ => ChannelFormat::Bit8,
         };
@@ -48,7 +50,7 @@ impl ChannelDef {
     }
 }
 
-pub const RESOLUTIONS: [u32; 6] = [128, 256, 512, 1024, 2048, 4096];
+pub const RESOLUTIONS: [u32; 7] = [64, 128, 256, 512, 1024, 2048, 4096];
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum LayerOpError {
@@ -84,7 +86,10 @@ impl TextureSet {
             name: name.into(),
             material_slot,
             resolution,
-            channels: ChannelKind::METAL_ROUGH.iter().map(|&k| ChannelDef::default_for(k)).collect(),
+            channels: ChannelKind::METAL_ROUGH
+                .iter()
+                .map(|&k| ChannelDef::default_for(k))
+                .collect(),
             layers: Vec::new(),
         }
     }
@@ -158,7 +163,11 @@ impl TextureSet {
     fn list_mut(&mut self, parent: Option<LayerId>) -> Result<&mut Vec<Arc<Layer>>, LayerOpError> {
         match parent {
             None => Ok(&mut self.layers),
-            Some(p) => self.find_mut(p).ok_or(LayerOpError::NotFound)?.children_mut().ok_or(LayerOpError::NotAFolder),
+            Some(p) => self
+                .find_mut(p)
+                .ok_or(LayerOpError::NotFound)?
+                .children_mut()
+                .ok_or(LayerOpError::NotAFolder),
         }
     }
 
@@ -210,7 +219,12 @@ impl TextureSet {
     // ----- structural edits ---------------------------------------------------------------------
 
     /// Insert at `index` within `parent` (clamped). Returns the new id.
-    pub fn insert(&mut self, parent: Option<LayerId>, index: usize, layer: Layer) -> Result<LayerId, LayerOpError> {
+    pub fn insert(
+        &mut self,
+        parent: Option<LayerId>,
+        index: usize,
+        layer: Layer,
+    ) -> Result<LayerId, LayerOpError> {
         let id = layer.id;
         let list = self.list_mut(parent)?;
         let index = index.min(list.len());
@@ -221,7 +235,9 @@ impl TextureSet {
     /// Insert directly above `reference` (same parent), or at the top of the root if None.
     pub fn insert_above(&mut self, reference: Option<LayerId>, layer: Layer) -> LayerId {
         match reference.and_then(|r| self.location(r)) {
-            Some(loc) => self.insert(loc.parent, loc.index + 1, layer).expect("parent exists"),
+            Some(loc) => self
+                .insert(loc.parent, loc.index + 1, layer)
+                .expect("parent exists"),
             None => {
                 let n = self.layers.len();
                 self.insert(None, n, layer).expect("root insert")
@@ -236,7 +252,12 @@ impl TextureSet {
     }
 
     /// Move `id` to `index` within `parent`. `index` refers to the list *after* removal.
-    pub fn move_to(&mut self, id: LayerId, parent: Option<LayerId>, index: usize) -> Result<(), LayerOpError> {
+    pub fn move_to(
+        &mut self,
+        id: LayerId,
+        parent: Option<LayerId>,
+        index: usize,
+    ) -> Result<(), LayerOpError> {
         if let Some(p) = parent {
             if self.is_descendant_or_self(p, id) {
                 return Err(LayerOpError::Cycle);
@@ -255,7 +276,10 @@ impl TextureSet {
     /// Duplicate above the original; returns the copy's id.
     pub fn duplicate(&mut self, id: LayerId) -> Result<LayerId, LayerOpError> {
         let loc = self.location(id).ok_or(LayerOpError::NotFound)?;
-        let mut copy = self.find(id).ok_or(LayerOpError::NotFound)?.duplicate_with_new_ids();
+        let mut copy = self
+            .find(id)
+            .ok_or(LayerOpError::NotFound)?
+            .duplicate_with_new_ids();
         copy.name = format!("{} copy", copy.name);
         self.insert(loc.parent, loc.index + 1, copy)
     }
@@ -285,8 +309,17 @@ mod tests {
         let mut t = ts();
         let a = t.insert_above(None, Layer::new_paint("A", &t.clone()));
         let b = t.insert_above(Some(a), Layer::new_fill("B", &t.clone()));
-        assert_eq!(t.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["A", "B"]);
-        assert_eq!(t.location(b), Some(LayerLocation { parent: None, index: 1 }));
+        assert_eq!(
+            t.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(),
+            ["A", "B"]
+        );
+        assert_eq!(
+            t.location(b),
+            Some(LayerLocation {
+                parent: None,
+                index: 1
+            })
+        );
         t.remove(a).unwrap();
         assert!(t.find(a).is_none());
         assert_eq!(t.remove(a), Err(LayerOpError::NotFound));
@@ -297,10 +330,18 @@ mod tests {
         let mut t = ts();
         let tc = t.clone();
         let f = t.insert_above(None, Layer::new_folder("F", &tc));
-        let inner = t.insert(Some(f), 0, Layer::new_folder("Inner", &tc)).unwrap();
+        let inner = t
+            .insert(Some(f), 0, Layer::new_folder("Inner", &tc))
+            .unwrap();
         let p = t.insert_above(None, Layer::new_paint("P", &tc));
         t.move_to(p, Some(inner), 0).unwrap();
-        assert_eq!(t.location(p), Some(LayerLocation { parent: Some(inner), index: 0 }));
+        assert_eq!(
+            t.location(p),
+            Some(LayerLocation {
+                parent: Some(inner),
+                index: 0
+            })
+        );
         assert_eq!(t.move_to(f, Some(inner), 0), Err(LayerOpError::Cycle));
         assert_eq!(t.move_to(f, Some(f), 0), Err(LayerOpError::Cycle));
         let q = t.insert_above(None, Layer::new_paint("Q", &tc));
@@ -316,7 +357,10 @@ mod tests {
         let _b = t.insert_above(None, Layer::new_paint("B", &tc));
         let _c = t.insert_above(None, Layer::new_paint("C", &tc));
         t.move_to(a, None, 2).unwrap();
-        assert_eq!(t.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["B", "C", "A"]);
+        assert_eq!(
+            t.layers.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(),
+            ["B", "C", "A"]
+        );
     }
 
     #[test]
@@ -337,13 +381,19 @@ mod tests {
         let tc = t.clone();
         let p = t.insert_above(None, Layer::new_paint("P", &tc));
         if let LayerContent::Paint(pc) = &mut t.find_mut(p).unwrap().content {
-            pc.channel_mut(ChannelKind::BaseColor, 256).set(1, 1, [1.0, 0.0, 0.0, 1.0]);
+            pc.channel_mut(ChannelKind::BaseColor, 256)
+                .set(1, 1, [1.0, 0.0, 0.0, 1.0]);
         }
         let d = t.duplicate(p).unwrap();
         assert_ne!(d, p);
         let (a, b) = (t.find(p).unwrap(), t.find(d).unwrap());
-        let (LayerContent::Paint(pa), LayerContent::Paint(pb)) = (&a.content, &b.content) else { panic!() };
-        assert!(pa.channels[&ChannelKind::BaseColor].same_storage(&pb.channels[&ChannelKind::BaseColor]));
+        let (LayerContent::Paint(pa), LayerContent::Paint(pb)) = (&a.content, &b.content) else {
+            panic!()
+        };
+        assert!(
+            pa.channels[&ChannelKind::BaseColor]
+                .same_storage(&pb.channels[&ChannelKind::BaseColor])
+        );
         assert_eq!(t.location(d).unwrap().index, 1);
     }
 
@@ -354,7 +404,19 @@ mod tests {
         let _a = t.insert_above(None, Layer::new_paint("A", &tc));
         let b = t.insert_above(None, Layer::new_paint("B", &tc));
         let g = t.group(b, "Folder 1").unwrap();
-        assert_eq!(t.location(g), Some(LayerLocation { parent: None, index: 1 }));
-        assert_eq!(t.location(b), Some(LayerLocation { parent: Some(g), index: 0 }));
+        assert_eq!(
+            t.location(g),
+            Some(LayerLocation {
+                parent: None,
+                index: 1
+            })
+        );
+        assert_eq!(
+            t.location(b),
+            Some(LayerLocation {
+                parent: Some(g),
+                index: 0
+            })
+        );
     }
 }

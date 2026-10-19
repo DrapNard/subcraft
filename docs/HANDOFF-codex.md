@@ -41,3 +41,44 @@ Next 3 steps:
 2. Local adjustments then blur/sharpen with numeric goldens, undo/save migration and GPU parity.
 3. Per-effect thumbnails/drag reorder, smart-material round trips; profile complex-model strokes
    and first-use graphics stalls. Compare Mask/anchors follow the stage graph.
+
+## 2026-10-20 — full Kalium transfer, SPP first
+
+Owner selected SubCraft as the main app/repository, then clarified that **all
+useful Kalium functionality** must be retained through integrated ports or
+verified equivalents. Import/safety alone does not complete the merge. SPP and
+everything touching editable SPP is the first priority. See
+`docs/integration/kalium-capabilities.md`; the full S0–S15 goal remains active.
+
+Resource constraint: all CPU-heavy commands use `scripts/dev/low-impact`
+(nice 19, four available CPUs, four Cargo/Rayon/test workers), one heavy job at
+a time. Actual wrapper verification reported CPUs 0–3 and nice 19. Old isolated
+Kalium preview was stopped. Do not start unrestricted Cargo/Ghidra work.
+
+Current semantic integration: 96 passed / 0 failed across document, compositor
+and project package test targets. New graph model uses stable UUID AO references,
+raw same-set AO data, original Kalium seeded-noise math, authored Roughness
+coverage overlay and tiled invalidation. Native schema 6 persists/validates it;
+old raster-only data defaults to no graph. Kalium v9 graph migration maps source
+numeric IDs deterministically. Source migration, 64px resolution and malformed
+input regressions are included. Three original Python probe tests pass. This
+is not full app, desktop rendering, all-feature parity or SPP acceptance.
+
+Workspace compilation is running separately at low priority; authoritative log:
+`/tmp/subcraft-workspace-check.log`. Its current session was 33358, root Cargo PID
+3143660 when last inspected. Poll/revalidate rather than restart a live job.
+Earlier project compile errors were fixed and are superseded by
+`/tmp/subcraft-semantic-integration-tests.log`. The previous renderer build is
+terminal/missing; its last partial log does not establish any GPU acceptance.
+
+SPP research: private corpus `/tmp/kalium-spp-variants`, documents extracted only
+from `/paint/document.bin`. Reusable bounded declaration probe now lives in
+`scripts/research/spp_reflective_probe.py`; verified output is
+`/tmp/subcraft-spp-probe-verified.txt`. Controlled visibility differs at one byte;
+opacity adds a 20-byte blending record. Checksum attribute remains unexplained
+after bounded standard-hash checks. General object grammar, HDF5 preservation,
+mesh 1.7 decoding and genuine edited Painter round trips remain unimplemented.
+Do not commit corpus SPPs or Painter resource payloads. Main next work is the
+bounded SPP semantic decoder/retention/writer contract, keeping the complete
+feature-transfer checklist open. Graph UI/Commands, edit journaling/checkpoints,
+Activity, CLI, all native legacy semantics and extension retention are still gaps.

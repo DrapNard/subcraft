@@ -1,0 +1,16 @@
+#!/usr/bin/env python3
+"""Run development commands at nice 19, using at most four available Linux CPUs."""
+import os
+import sys
+
+if len(sys.argv) < 2:
+    sys.exit("Usage: scripts/dev/low-impact <command> [arguments...]")
+
+if hasattr(os, "sched_getaffinity"):
+    cpus = sorted(os.sched_getaffinity(0))[:4]
+    os.sched_setaffinity(0, cpus)
+os.nice(19)
+os.environ["CARGO_BUILD_JOBS"] = "4"
+os.environ["RAYON_NUM_THREADS"] = "4"
+os.environ["RUST_TEST_THREADS"] = "4"
+os.execvp(sys.argv[1], sys.argv[1:])

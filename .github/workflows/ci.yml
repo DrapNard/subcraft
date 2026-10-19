@@ -10,6 +10,9 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: 4
+  RAYON_NUM_THREADS: 4
+  RUST_TEST_THREADS: 4
 
 jobs:
   linux:
@@ -23,7 +26,7 @@ jobs:
       - name: Install Mesa Vulkan driver
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
   windows:
     name: Build + engine tests (Windows)
@@ -33,6 +36,18 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --workspace
+        run: cargo build --locked --workspace
       - name: Engine tests
-        run: cargo test -p subcraft-core -p subcraft-image -p subcraft-mesh -p subcraft-doc -p subcraft-materials -p subcraft-compositor -p subcraft-paint -p subcraft-bake -p subcraft-project -p subcraft-export -p subcraft-assets -p subcraft-app
+        run: cargo test --locked -p subcraft-core -p subcraft-image -p subcraft-mesh -p subcraft-doc -p subcraft-materials -p subcraft-compositor -p subcraft-paint -p subcraft-bake -p subcraft-project -p subcraft-export -p subcraft-assets -p subcraft-app
+
+  macos:
+    name: Build + engine tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --locked --workspace
+      - name: Engine tests
+        run: cargo test --locked -p subcraft-core -p subcraft-image -p subcraft-mesh -p subcraft-doc -p subcraft-materials -p subcraft-compositor -p subcraft-paint -p subcraft-bake -p subcraft-project -p subcraft-export -p subcraft-assets -p subcraft-app

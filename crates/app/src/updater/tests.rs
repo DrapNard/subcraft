@@ -2,9 +2,9 @@ use super::*;
 use super::apply::*;
 use std::io::Cursor;
 fn dir() -> PathBuf { let p = std::env::temp_dir().join(format!("subcraft-update-test-{}", uuid::Uuid::new_v4())); std::fs::create_dir_all(&p).unwrap(); p }
-fn asset(bytes: &[u8]) -> Asset { Asset { name: "SubCraft-0.1.4-windows-x64.zip".into(), browser_download_url: "https://github.com/Aalzard/subcraft/releases/download/v0.1.4/SubCraft-0.1.4-windows-x64.zip".into(), size: bytes.len() as u64, digest: format!("sha256:{:x}", Sha256::digest(bytes)) } }
+fn asset(bytes: &[u8]) -> Asset { Asset { name: "SubCraft-0.1.4-windows-x64.zip".into(), browser_download_url: "https://github.com/DrapNard/subcraft/releases/download/v0.1.4/SubCraft-0.1.4-windows-x64.zip".into(), size: bytes.len() as u64, digest: format!("sha256:{:x}", Sha256::digest(bytes)) } }
 fn json(version: &str, kind: PackageKind) -> String {
-    let name = kind.name(version); serde_json::json!({"tag_name":format!("v{version}"),"draft":false,"prerelease":false,"body":"notes", "assets":[{"name":name,"browser_download_url":format!("https://github.com/Aalzard/subcraft/releases/download/v{version}/{name}"),"size":4,"digest":format!("sha256:{:x}",Sha256::digest(b"test"))}]}).to_string()
+    let name = kind.name(version); serde_json::json!({"tag_name":format!("v{version}"),"draft":false,"prerelease":false,"body":"notes", "assets":[{"name":name,"browser_download_url":format!("https://github.com/DrapNard/subcraft/releases/download/v{version}/{name}"),"size":4,"digest":format!("sha256:{:x}",Sha256::digest(b"test"))}]}).to_string()
 }
 #[test]
 fn release_selection_uses_semver_and_the_install_type() {
@@ -94,4 +94,13 @@ fn linux_tar_extracts_only_the_expected_regular_executable() {
     tar.append_data(&mut header,"SubCraft-0.1.4-linux-x86_64/subcraft",binary.as_slice()).unwrap(); tar.into_inner().unwrap().finish().unwrap();
     let bytes=std::fs::read(&path).unwrap(); let mut release=parse_release(&json("0.1.4",PackageKind::LinuxPortable),"0.1.3",PackageKind::LinuxPortable).unwrap().unwrap(); release.asset.size=bytes.len() as u64; release.asset.digest=format!("sha256:{:x}",Sha256::digest(&bytes));
     let out=root.join("new-app"); extract_binary(&release,&path,&out).unwrap(); assert_eq!(std::fs::read(out).unwrap(),binary); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn merged_fork_accepts_only_its_own_release_packages() {
+    let accepted = json("0.1.8", PackageKind::WindowsPortable);
+    assert!(parse_release(&accepted, "0.1.7", PackageKind::WindowsPortable).unwrap().is_some());
+    let original_upstream = accepted.replace("github.com/DrapNard/subcraft", "github.com/Aalzard/subcraft");
+    assert!(parse_release(&original_upstream, "0.1.7", PackageKind::WindowsPortable).is_err());
+    assert_eq!(RELEASE_API, "https://api.github.com/repos/DrapNard/subcraft/releases/latest");
 }
