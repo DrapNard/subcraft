@@ -62,7 +62,7 @@ Current scoped validation: **96 passed, 0 failed** across the SubCraft document,
 compositor and project package test targets, including new procedural graph
 math/composition, AO dependencies, native graph save/reopen and Kalium graph
 reference migration. This is not full-app or SPP acceptance. The probe's three
-synthetic Python tests also pass. Workspace compilation and platform/runtime
-checks remain separate gates. All heavy commands use nice 19 and four CPUs.
+synthetic Python tests also pass. Workspace compilation (`cargo check --locked --workspace`) also passes.
+Full workspace test execution and platform/runtime checks remain separate gates. All heavy commands use nice 19 and four CPUs.
 Original upstream results and Kalium's former 614-test result do not prove this
 combined app. The complete merge remains in progress.

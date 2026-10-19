@@ -167,6 +167,7 @@ mod launch_tests {
     }
 
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn dropped_kalium_project_preserves_unsaved_work_until_confirmation() {
         let mut app = SubcraftApp {
             state: UiState::new(Session::new(subcraft_mesh::primitives::cube(2.0), 64), None),
@@ -177,7 +178,13 @@ mod launch_tests {
         let before = app.state.session.document().clone();
         let path = PathBuf::from("artist.KALIUM");
         let ctx = egui::Context::default();
-        let input = egui::RawInput { dropped_files: vec![egui::DroppedFile { path: Some(path.clone()), ..Default::default() }], ..Default::default() };
+        #[derive(Debug)]
+        struct TestDrop(PathBuf);
+        impl egui::DroppedFile for TestDrop {
+            fn path(&self) -> &std::path::Path { &self.0 }
+            fn bytes(&self) -> Result<Vec<u8>, String> { Err("routing must not read the file".into()) }
+        }
+        let input = egui::RawInput { dropped_files: vec![std::sync::Arc::new(TestDrop(path.clone()))], ..Default::default() };
         let _ = ctx.run(input, |ctx| app.dropped_project(ctx, 0.0));
         assert_eq!(app.state.confirm, Some(Pending::OpenRecent));
         assert_eq!(app.state.welcome.pending_recent, Some(path));
@@ -465,8 +472,8 @@ impl SubcraftApp {
         if self.state.confirm.is_some() || !self.state.recovery.crashed.is_empty() || self.pending_now.is_some() {
             return;
         }
-        let path = ctx.input(|input| input.raw.dropped_files.iter().filter_map(|file| file.path.as_ref())
-            .find(|path| subcraft_app::launch::file_kind(path) == Some(subcraft_app::launch::FileKind::Project)).cloned());
+        let path = ctx.input(|input| input.raw.dropped_files.iter().map(|file| file.path())
+            .find(|path| subcraft_app::launch::file_kind(path) == Some(subcraft_app::launch::FileKind::Project)).map(std::path::Path::to_path_buf));
         if let Some(path) = path {
             self.state.welcome.pending_recent = Some(path);
             self.request(Pending::OpenRecent, now);

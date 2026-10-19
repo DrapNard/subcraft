@@ -82,3 +82,10 @@ Do not commit corpus SPPs or Painter resource payloads. Main next work is the
 bounded SPP semantic decoder/retention/writer contract, keeping the complete
 feature-transfer checklist open. Graph UI/Commands, edit journaling/checkpoints,
 Activity, CLI, all native legacy semantics and extension retention are still gaps.
+
+Publication checkpoint: full `cargo check --locked --workspace` now passes after
+updating dropped-file routing and its mock to egui 0.36's `DroppedFile` trait.
+The focused 96-test semantic suite and three probe tests pass. Full combined
+workspace test execution, rendered runtime and hosted platform gates remain
+unverified. Source is publishable as an in-progress integration, not a finished
+all-features merge or SPP implementation.
