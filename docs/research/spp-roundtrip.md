@@ -1,6 +1,7 @@
 # SPP controlled fixture investigation
 
-2026-10-19. **Research only: Neither SubCraft nor Kalium can yet open or save editable SPP projects.**
+Updated 2026-10-20. **SubCraft cannot yet open or save complete editable SPP projects.**
+A controlled externally edited SPP has now reopened in Painter; details below.
 The owner has made standalone SPP editing the sole target project-format workflow.
 
 ## Reproduction and provenance
@@ -73,8 +74,8 @@ resource datasets were inventoried by name/size, not extracted.
 3. Choose an HDF5 integration that preserves unknown objects and is buildable
    on supported platforms; reject external links and unsupported semantics.
 4. Implement genuine edits and atomic save, then reopen in Painter and compare
-   editable layer state and exported maps. Repeat Painter → Kalium → Painter →
-   Kalium, including failure preservation. Until then SPP support is incomplete.
+   editable layer state and exported maps. Repeat Painter → SubCraft → Painter →
+   SubCraft, including failure preservation. Until then SPP support is incomplete.
 
 ## Public contracts consulted
 
@@ -154,3 +155,60 @@ edits, truncation and bounds. This is **dataset-level research only**. HDF5
 checksums, opaque resource/container preservation, mesh and broader layer/action
 semantics and edited SPP files reopened in Painter remain unresolved. The codec
 is not wired as an SPP importer or writer in the application.
+
+
+## 2026-10-20: checksum verified and edited fixture reopened
+
+The standard MurmurHash3 x64/128 mixing arithmetic was independently inverted
+for each of six owned fixture datasets. All six recover the same initial state:
+`(0xF13A0239, 0xF13A0239)`. Forward hashing the raw dataset bytes with that seed
+matches both ordered unsigned 64-bit attribute words in every fixture. Swapped
+word/byte interpretations do not yield a shared initial state. The synthetic
+inverse probe is in `scripts/research/spp_hash_probe.py`; its tests cover known
+vectors and all short tail lengths, without brute-forcing a seed range.
+
+This agrees with the independently published, unofficial interoperability
+[checksum helper](https://github.com/Yeusepe/Universal-Painter-Files/blob/main/spp_downgrader/spp_builder/spp_builder.py#L1186-L1190).
+The algorithm contract remains the public-domain
+[SMHasher reference](https://github.com/aappleby/smhasher/blob/master/src/MurmurHash3.cpp),
+not proprietary Adobe code. This observation establishes the checksum for the
+observed U8 document datasets, not all possible HDF5 datatypes or future formats.
+
+`crates/project/src/spp_document.rs` ports the bounded neutral record codec to
+Rust. It preserves reserved header words, unknown property names of supported
+types, and raw float bits, recomputes object offsets and rejects unresolved
+encodings. Six private document extracts reencode byte-for-byte in Rust.
+`crates/project/src/spp_checksum.rs` implements the verified checksum parameters.
+No project/container importer is exposed through these experimental modules.
+
+An owned baseline copy was changed outside Painter: its layer name was encoded
+as `SubCraft`, and its document checksum recalculated. The file size stayed
+12,783,808 bytes, with 27 byte differences (name, checksum, and HDF5 object-header
+metadata). Source SHA-256 stayed
+`ab393eb6c32ccd0eb096241a39db2ef3a08dd57599d97b8389a6fc685b2cb56e`;
+edited SHA-256 was
+`f1f859e9ca1458ef0f16881a306811587838d8b9ad986a5f1d5c7977b474af47`.
+The private research patch used the installed HDF5 C library on a copied fixture;
+it never replaced the original or exported resource datasets.
+
+REA controlled runtime evidence:
+`ev_8a0a3d89b5079e0e864183c1b9323c4194c780f80fd4b599d24860c77c0f0e7c`.
+The owned Painter process reopened the edited copy in edition state, reported
+`["SubCraft", true, 1.0]` for layer name/visibility/Base Color opacity, closed it,
+and confirmed the edited archive digest was unchanged by opening. Probe exit 0.
+Process-tree observation was incomplete and unrelated processes were left alone;
+no filesystem snapshot was requested in REA. The probe's explicit hash checks
+are narrower evidence than a full filesystem trace.
+
+**Remaining acceptance:** actual SubCraft SPP container I/O and document/mesh/
+resource mapping, nonblank strokes/fills/masks/channels, unknown-data preservation,
+atomic save/failure handling, and reverse edited round trips. This successful
+single-name fixture edit is not general SPP support or app open/save acceptance.
+
+
+Current verification: 43 project unit tests pass, including seven record-codec
+and two checksum tests. The opt-in private Rust corpus test passes for all six
+owned extracts, checking both exact reencoding and the HDF5 attribute checksum.
+Eight synthetic Python research tests pass. Full workspace compilation passes.
+All local heavy validation uses nice 19 and four CPUs. The next container work
+is specified in [the integration checkpoint](spp-container-plan.md).

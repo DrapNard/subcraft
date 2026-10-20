@@ -17,7 +17,7 @@ integration acceptance. Nothing below is waived by choosing a different engine.
 | Capability | Current evidence | Required next evidence |
 |---|---|---|
 | Real editable open/save | Missing in both apps | SubCraft → Painter → SubCraft edited round trip |
-| Container/record contract | Owned HDF5 fixtures; controlled layer differences | Bounded semantic decoder and checksum verification |
+| Container/record contract | Bounded Rust record codec; six checksum matches; externally edited layer name reopened in Painter | Container integration and broader record semantics |
 | Layers, channels, masks, fills, materials and mesh | SubCraft models exist; SPP mappings missing | Editable data matches oracle state and exported maps |
 | Opaque and unknown records/resources | Preservation policy only | Unknown objects survive known edits byte/semantically intact |
 | Atomic save and original preservation | Native safety changes pending validation | Failed/canceled SPP writes preserve original; real SPP staging |
@@ -31,7 +31,7 @@ integration acceptance. Nothing below is waived by choosing a different engine.
 | Eight PBR channels and linear color/data conventions | Existing 13-channel model; import/composition parity pending |
 | Paint/Fill/Group, masks, visibility/opacity/channel switches | Existing richer layers/effects; nested migration parity pending |
 | Normal, arithmetic and color blend modes | Existing 32-mode family; exact legacy semantics pending |
-| AO-linked seeded procedural Roughness graph | Typed graph/compositor and schema/migration numeric tests pass; graph editing UI pending |
+| AO-linked seeded procedural Roughness graph | Typed graph/compositor/schema and graph editing commands tested; UI controls compiled, runtime pending |
 | 3D/UV brushes, alpha tips, eraser and stroke history | Existing projection/tiled brush engine; equivalent workflow evidence pending |
 | UV-boundary clipping, seam strokes and UV pan/zoom | Existing engine candidates; numerical/input parity pending |
 | Tolerance flood fill, clear/reset, masks | Audit exact flood-fill behavior; polygon fill alone is not equivalent |

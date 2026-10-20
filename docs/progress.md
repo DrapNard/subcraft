@@ -5,7 +5,10 @@
 SubCraft is the sole target. The owner abandoned `.kalium` and `.kbrush`
 compatibility; their adapters are removed/rejected. Genuine editable SPP is the
 first format priority and **is not implemented yet**. Persistent Activity,
-headless workflows and seeded Roughness graph controls are integrated. Latest
+headless workflows and seeded Roughness graph controls are integrated. An
+experimental Rust SPP record codec and checksum now pass six owned dataset
+checks; an externally renamed SPP fixture reopened editable in Painter. This
+is research acceptance, not SubCraft SPP open/save support. Latest
 scoped validation: 76 Rust tests and 6 Python research tests passed; workspace
 compile passes. UI runtime/visual and full SPP roundtrip acceptance remain open.
 See `integration/kalium-merge.md` and `research/spp-roundtrip.md`. Historical

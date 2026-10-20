@@ -45,6 +45,10 @@ recognition is not a semantic importer. See [SPP research](docs/research/spp-rou
 A Painter-dependent bridge or flattened texture extraction does not meet the
 standalone editable SPP goal.
 
+Research progress: a bounded Rust internal-record codec and dataset checksum
+are tested, and an externally edited layer-name fixture reopens in Painter.
+This narrow experiment is not SubCraft project import/save support.
+
 ## Painting and materials
 
 - Paint and erase directly on a 3D mesh or in the UV view; brush alphas, symmetry,

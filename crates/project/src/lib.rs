@@ -17,6 +17,8 @@ pub mod fragment;
 pub mod limits;
 pub mod raster;
 pub mod schema;
+pub mod spp_checksum;
+pub mod spp_document;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, Write};
