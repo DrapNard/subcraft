@@ -14,6 +14,8 @@ Read README.md, CLAUDE.md, docs/progress.md and docs/integration/kalium-merge.md
 - The combined app is AGPL-3.0-only. Preserve original MIT/Apache and resource
   notices; no Adobe source, shaders, icons or bundled resources.
 - No image generation or generative AI product features.
+- Owner decision (2026-10-20): abandon `.kalium` and `.kbrush` compatibility.
+  Transfer useful editor capabilities, but do not develop or expose Kalium format adapters.
 - Keep editable SPP open/save as the first format priority. Detection, renamed
   archives, flattening and a Painter-dependent bridge are not SPP support.
 - Treat imported data as untrusted. Validate dimensions, allocations, recursion,

@@ -1,5 +1,17 @@
 # SubCraft — implementation progress
 
+## Fork update — 2026-10-20
+
+SubCraft is the sole target. The owner abandoned `.kalium` and `.kbrush`
+compatibility; their adapters are removed/rejected. Genuine editable SPP is the
+first format priority and **is not implemented yet**. Persistent Activity,
+headless workflows and seeded Roughness graph controls are integrated. Latest
+scoped validation: 76 Rust tests and 6 Python research tests passed; workspace
+compile passes. UI runtime/visual and full SPP roundtrip acceptance remain open.
+See `integration/kalium-merge.md` and `research/spp-roundtrip.md`. Historical
+upstream sections below are not current fork acceptance.
+
+
 Last updated: 2026-10-18 (sessions 70–71: background compositing, sparse GPU uploads, 0.1.7)
 
 ## Decisions

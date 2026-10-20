@@ -214,30 +214,21 @@ impl Session {
         }
     }
 
-    /// Open a native `.subcraft` project or import an editable `.kalium` project.
+    /// Open a native `.subcraft` project. Genuine SPP support is still in development.
     pub fn open_project(path: &Path) -> Result<Self, String> {
         Self::open_project_labeled(path, "Open Project")
     }
 
     pub(crate) fn open_project_labeled(path: &Path, label: &str) -> Result<Self, String> {
-        let imported = path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| ext.eq_ignore_ascii_case("kalium"));
-        let data = if imported {
-            subcraft_project::kalium::load_kalium_project(path)
-        } else {
-            subcraft_project::load_project(path)
-        }.map_err(|e| e.to_string())?;
+        if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush")) {
+            return Err("Kalium formats are not supported; development targets genuine SPP interoperability".into());
+        }
+        let data = subcraft_project::load_project(path).map_err(|e| e.to_string())?;
         if data.document.texture_sets.is_empty() {
             return Err("project has no texture sets".into());
         }
         let mut s = Self::from_parts(data.mesh, data.document, data.resources, label);
-        if imported {
-            // The source is never a native save target. Imported work is unsaved
-            // even before its first edit, so close prompts and autosave protect it.
-            s.mark_recovered(None);
-            s.imported_name = path.file_stem().and_then(|name| name.to_str()).map(str::to_string);
-        } else {
-            s.project_path = Some(path.to_path_buf());
-        }
+        s.project_path = Some(path.to_path_buf());
         for (ts, maps) in data.mesh_maps {
             s.mesh_maps.insert(ts, MeshMaps::from_map(maps));
         }
@@ -833,6 +824,32 @@ impl Session {
                 self.edit_layer_set(layer, "Projection", Some(key), |ts| {
                     let LayerContent::Fill(f) = &mut Self::layer_mut(ts, layer)?.content else { return Err(CommandError::NotAFillLayer) };
                     f.projection = projection;
+                    Ok(())
+                })?;
+            }
+            Command::SetProceduralGraph { layer, graph } => {
+                if let Some(graph) = &graph {
+                    graph.validate().map_err(|e| CommandError::Invalid(e.to_string()))?;
+                    if let Some(source_id) = graph.occlusion_source_layer_id() {
+                        if source_id == layer {
+                            return Err(CommandError::Invalid("Occlusion source must be a different paint layer".into()));
+                        }
+                        let source_set = self.texture_set_of(layer).and_then(|id| self.doc.texture_set(id))
+                            .ok_or(CommandError::LayerNotFound)?;
+                        let source = source_set.find(source_id).ok_or_else(|| CommandError::Invalid("Occlusion source layer is not in this texture set".into()))?;
+                        let has_ao = matches!(&source.content, LayerContent::Paint(paint) if paint.channels.contains_key(&ChannelKind::AmbientOcclusion));
+                        if !has_ao {
+                            return Err(CommandError::Invalid("Occlusion source must be a paint layer with an Ambient Occlusion channel".into()));
+                        }
+                    }
+                }
+                let key = format!("procedural-roughness:{layer}");
+                self.edit_layer_set(layer, "Procedural Roughness", Some(key), |ts| {
+                    let target = Self::layer_mut(ts, layer)?;
+                    let LayerContent::Paint(paint) = &mut target.content else {
+                        return Err(CommandError::Invalid("procedural Roughness graphs require a paint layer".into()));
+                    };
+                    paint.procedural_graph = graph;
                     Ok(())
                 })?;
             }

@@ -11,7 +11,7 @@ pub enum FileKind { Project, Model }
 
 pub fn file_kind(path: &Path) -> Option<FileKind> {
     let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-    if ext == crate::PROJECT_EXTENSION || ext == "kalium" || ext == "spp" { Some(FileKind::Project) }
+    if ext == crate::PROJECT_EXTENSION || ext == "spp" { Some(FileKind::Project) }
     else if subcraft_mesh::SUPPORTED_EXTENSIONS.contains(&ext.as_str()) { Some(FileKind::Model) }
     else { None }
 }
@@ -56,7 +56,7 @@ impl Session {
         match file_kind(path) {
             Some(FileKind::Project) => Self::open_project(path).map(|s| (s, Vec::new())),
             Some(FileKind::Model) => Self::open_mesh(path, DEFAULT_RESOLUTION),
-            None => Err("Choose a SubCraft or Kalium project, or an OBJ, FBX, glTF or GLB model".into()),
+            None => Err("Choose a SubCraft project, or an OBJ, FBX, glTF or GLB model".into()),
         }
     }
 }
@@ -96,7 +96,8 @@ mod tests {
     #[test]
     fn supported_files_and_all_six_guide_actions_are_explicit() {
         assert_eq!(file_kind(Path::new("A.SUBCRAFT")), Some(FileKind::Project));
-        assert_eq!(file_kind(Path::new("A.KALIUM")), Some(FileKind::Project));
+        assert_eq!(file_kind(Path::new("A.KALIUM")), None);
+        assert_eq!(file_kind(Path::new("A.kbrush")), None);
         // Route SPP to the format diagnostic, never to a mesh importer.
         assert_eq!(file_kind(Path::new("A.SPP")), Some(FileKind::Project));
         for ext in subcraft_mesh::SUPPORTED_EXTENSIONS { assert_eq!(file_kind(Path::new(&format!("A.{ext}"))), Some(FileKind::Model)); }

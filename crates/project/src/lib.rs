@@ -14,7 +14,6 @@
 #![cfg_attr(test, recursion_limit = "256")]
 
 pub mod fragment;
-pub mod kalium;
 pub mod limits;
 pub mod raster;
 pub mod schema;
@@ -492,6 +491,11 @@ pub fn save_project(
 }
 
 fn reject_spp_save_path(path: &Path) -> Result<(), ProjectError> {
+    if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+        matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush")
+    }) {
+        return Err(ProjectError::Invalid("Kalium formats are not supported".into()));
+    }
     if path
         .extension()
         .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("spp"))
@@ -1168,6 +1172,11 @@ pub fn load_project(path: &Path) -> Result<ProjectData, ProjectError> {
 }
 
 fn reject_spp_load_path(path: &Path) -> Result<(), ProjectError> {
+    if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
+        matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush")
+    }) {
+        return Err(ProjectError::Invalid("Kalium formats are not supported".into()));
+    }
     if path
         .extension()
         .is_some_and(|extension| extension.to_string_lossy().eq_ignore_ascii_case("spp"))

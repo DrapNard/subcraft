@@ -2,7 +2,7 @@
 //! [`Session::execute`](crate::Session::execute); widgets never edit the document directly.
 
 use subcraft_core::{ChannelKind, EffectId, LayerId, TextureSetId};
-use subcraft_doc::{BlendMode, ContentEffect, ContentEffectKind, FillChannel, Layer, MaskEffect, MaskEffectKind, PartMask, Projection};
+use subcraft_doc::{BlendMode, ContentEffect, ContentEffectKind, FillChannel, Layer, MaskEffect, MaskEffectKind, PartMask, ProceduralGraph, Projection};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum NewLayer {
@@ -74,6 +74,9 @@ pub enum Command {
     /// Coalesces like opacity.
     SetFillChannel { layer: LayerId, channel: ChannelKind, fill: FillChannel },
     SetFillProjection { layer: LayerId, projection: Projection },
+    /// Replace or remove the generated Roughness graph on a paint layer. Edits to its parameters
+    /// coalesce until the next sealed gesture.
+    SetProceduralGraph { layer: LayerId, graph: Option<ProceduralGraph> },
     AddMask { layer: LayerId, white: bool },
     RemoveMask(LayerId),
     CopyMask(LayerId),

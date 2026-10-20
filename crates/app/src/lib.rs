@@ -4,10 +4,12 @@
 //! calls, and read back the document, history and composites to display them.
 
 pub mod actions;
+pub mod activity;
 pub mod asset_apply;
 pub mod bake_job;
 pub mod brush_preset;
 pub mod brush_textures;
+pub mod cli;
 pub mod command;
 pub mod diagnostics;
 pub mod images;

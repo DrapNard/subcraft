@@ -129,3 +129,28 @@ representations did not match; results agreed with FFmpeg libavutil's independen
 implementation. This strengthens only that bounded negative, not another hash
 hypothesis. Checksum coverage/seed and general object/reference grammar remain
 unknown. No edited SPP has yet been accepted by Painter.
+
+
+## 2026-10-20: bounded reflective dataset codec
+
+`scripts/research/spp_document_codec.py` now walks class declarations and object
+boundaries rather than fixed layer offsets. On the five privately retained
+baseline/rename/opacity/hidden/incremental owned fixtures, decode/reencode is
+byte-identical (2352 or 2372 bytes). Renaming the baseline layer to the oracle
+name reproduces the rename dataset exactly; disabling the opacity fixture layer
+reproduces the hidden dataset exactly. Adding the observed Base Color opacity
+record at 0.375 also reproduces the opacity dataset exactly. No private datasets
+are committed.
+
+Observed framing: pointer objects carry absolute end offsets and class indices;
+first class occurrences carry inline property definitions. By-value array members
+omit the end-offset word. Type 15 and 21 consume eight bytes in this corpus;
+boolean values are 00/ff. Nonempty type-11 tags and unknown property codes reject.
+Header words whose meanings remain unknown are retained unchanged. These are
+limited observations from blank paint-layer fixtures, not a general format spec.
+
+Six original synthetic research tests pass, including exact reencoding, semantic
+edits, truncation and bounds. This is **dataset-level research only**. HDF5
+checksums, opaque resource/container preservation, mesh and broader layer/action
+semantics and edited SPP files reopened in Painter remain unresolved. The codec
+is not wired as an SPP importer or writer in the application.

@@ -6,6 +6,9 @@
 // build from a terminal to see them).
 #![cfg_attr(all(windows, feature = "windows-gui"), windows_subsystem = "windows")]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod preview;
+
 /// mimalloc instead of the system heap: compositing allocates per-tile buffers on every core,
 /// which the Windows heap serializes (ADR-0018).
 #[cfg(not(target_arch = "wasm32"))]
@@ -32,6 +35,13 @@ fn main() -> anyhow::Result<()> {
     if cli.first().is_some_and(|a| a == "--apply-update") {
         let path = cli.get(1).ok_or_else(|| anyhow::anyhow!("Missing update job"))?;
         return subcraft_app::updater::apply_job(std::path::Path::new(path)).map_err(|e| anyhow::anyhow!("{e}"));
+    }
+    let headless_args: Vec<String> = std::env::args().skip(1).collect();
+    if headless_args.first().is_some_and(|argument| argument == "preview") {
+        return preview::run(&headless_args);
+    }
+    if subcraft_app::cli::run(&headless_args).map_err(anyhow::Error::msg)? {
+        return Ok(());
     }
     // Logs go to the data folder (and to the console of non-packaged builds); panics leave a
     // crash report there that the next start shows.

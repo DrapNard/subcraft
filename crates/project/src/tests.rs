@@ -712,3 +712,13 @@ fn procedural_roughness_graph_preserves_stable_source_reference_after_save() {
     assert_eq!(paint.procedural_graph.as_ref().unwrap().occlusion_source_layer_id(), Some(source_id));
     assert_eq!(paint.procedural_graph.as_ref().unwrap(), &graph);
 }
+
+
+#[test]
+fn abandoned_kalium_formats_reject_before_access_or_write() {
+    for name in ["legacy.kalium", "legacy.KALIUM", "brush.kbrush"] {
+        let path = std::path::Path::new(name);
+        assert!(super::reject_spp_load_path(path).unwrap_err().to_string().contains("not supported"));
+        assert!(super::reject_spp_save_path(path).unwrap_err().to_string().contains("not supported"));
+    }
+}

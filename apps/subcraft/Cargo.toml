@@ -20,6 +20,9 @@ update-fixture = ["subcraft-ui/update-fixture", "subcraft-app/update-fixture"]
 [dependencies]
 subcraft-ui.workspace = true
 subcraft-app.workspace = true
+subcraft-render.workspace = true
+glam.workspace = true
+image.workspace = true
 eframe.workspace = true
 log.workspace = true
 anyhow.workspace = true

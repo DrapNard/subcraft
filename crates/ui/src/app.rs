@@ -28,6 +28,7 @@ pub enum Tab {
     Parts,
     History,
     Shelf,
+    Activity,
 }
 
 impl Tab {
@@ -42,6 +43,7 @@ impl Tab {
             Tab::Parts => "Parts",
             Tab::History => "History",
             Tab::Shelf => "Shelf",
+            Tab::Activity => "Activity",
         }
     }
 
@@ -56,6 +58,7 @@ impl Tab {
             Tab::Parts => icons::CUBE_WIRE,
             Tab::History => icons::HISTORY,
             Tab::Shelf => icons::SQUARES,
+            Tab::Activity => icons::HISTORY,
         }
     }
 }
@@ -108,11 +111,17 @@ pub fn default_layout() -> DockState<Tab> {
     let mut dock = DockState::new(vec![Tab::Viewport, Tab::UvView]);
     let surface = dock.main_surface_mut();
     let [center, right] = surface.split_right(NodeIndex::root(), 0.8, vec![Tab::Layers]);
-    surface.split_below(right, 0.4, vec![Tab::Properties, Tab::Brush]);
+    surface.split_below(right, 0.4, vec![Tab::Properties, Tab::Brush, Tab::Activity]);
     let [center, left] = surface.split_left(center, 0.15, vec![Tab::Parts, Tab::TextureSets]);
     surface.split_below(left, 0.42, vec![Tab::History]);
     surface.split_below(center, 0.74, vec![Tab::Shelf]);
     dock
+}
+
+fn ensure_activity_tab(dock: &mut DockState<Tab>) {
+    if dock.find_tab(&Tab::Activity).is_none() {
+        dock.push_to_focused_leaf(Tab::Activity);
+    }
 }
 
 const DOCK_KEY: &str = "subcraft_dock_v4";
@@ -134,6 +143,22 @@ mod inspector_tests;
 #[cfg(test)]
 mod launch_tests {
     use super::*;
+
+    #[test]
+    fn activity_is_in_default_layout_and_added_to_saved_layout_without_dropping_panes() {
+        let default = default_layout();
+        for tab in [Tab::Viewport, Tab::UvView, Tab::Layers, Tab::Properties, Tab::Brush, Tab::TextureSets, Tab::Parts, Tab::History, Tab::Shelf, Tab::Activity] {
+            assert!(default.find_tab(&tab).is_some(), "missing {tab:?}");
+        }
+        let mut legacy = DockState::new(vec![Tab::Viewport, Tab::UvView]);
+        ensure_activity_tab(&mut legacy);
+        assert!(legacy.find_tab(&Tab::Viewport).is_some());
+        assert!(legacy.find_tab(&Tab::UvView).is_some());
+        assert!(legacy.find_tab(&Tab::Activity).is_some());
+        ensure_activity_tab(&mut legacy);
+        // A second migration must not duplicate the Activity tab.
+        assert_eq!(legacy.iter_all_tabs().count(), 3);
+    }
 
     #[test]
     fn restored_updates_and_existing_work_open_directly_in_the_workspace() {
@@ -168,7 +193,7 @@ mod launch_tests {
 
     #[test]
     #[cfg(not(target_arch = "wasm32"))]
-    fn dropped_kalium_project_preserves_unsaved_work_until_confirmation() {
+    fn dropped_project_preserves_unsaved_work_until_confirmation() {
         let mut app = SubcraftApp {
             state: UiState::new(Session::new(subcraft_mesh::primitives::cube(2.0), 64), None),
             dock: default_layout(), frames: 0, screenshot: None, screenshot_requested: false,
@@ -176,7 +201,7 @@ mod launch_tests {
         };
         app.state.session.execute(Command::AddLayer(NewLayer::Paint)).unwrap();
         let before = app.state.session.document().clone();
-        let path = PathBuf::from("artist.KALIUM");
+        let path = PathBuf::from("artist.SUBCRAFT");
         let ctx = egui::Context::default();
         #[derive(Debug)]
         struct TestDrop(PathBuf);
@@ -403,13 +428,15 @@ impl SubcraftApp {
 
         #[cfg(all(feature = "update-fixture", not(target_arch = "wasm32")))]
         if options.auto_update_fixture && let Some(updater) = &mut state.updater { updater.request_update(); }
-        let dock = cc
+        let mut dock = cc
             .storage
             .and_then(|s| s.get_string(DOCK_KEY))
             .and_then(|j| serde_json::from_str(&j).ok())
             .filter(|_| options.screenshot.is_none())
             .unwrap_or_else(default_layout);
-        let mut dock = dock;
+        // Existing user workspaces gain the new independent panel in their focused group.
+        // Preserve their sizing and all saved tabs instead of resetting the whole layout.
+        ensure_activity_tab(&mut dock);
         if options.view_2d
             && let Some(path) = dock.find_tab(&Tab::UvView)
         {
@@ -938,6 +965,7 @@ impl egui_dock::TabViewer for Viewer<'_> {
             Tab::Parts => crate::edit_profile::time_tab("  tab Parts", || panels::parts::show(self.state, ui)),
             Tab::History => crate::edit_profile::time_tab("  tab History", || panels::history::show(self.state, ui)),
             Tab::Shelf => crate::edit_profile::time_tab("  tab Shelf", || panels::shelf::show(self.state, ui)),
+            Tab::Activity => crate::edit_profile::time_tab("  tab Activity", || crate::activity::show(self.state, ui)),
         }
     }
 

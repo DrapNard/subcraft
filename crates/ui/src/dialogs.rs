@@ -71,10 +71,12 @@ pub fn save(state: &mut UiState, save_as: bool, now: f64) -> bool {
         Ok(p) => {
             state.welcome.remember(&p);
             state.set_status(format!("Saved {}", p.display()), now);
+            state.record_activity(subcraft_app::activity::ActivityLevel::Info, "Project", "Saved project");
             true
         }
         Err(e) => {
             state.set_status(format!("Save failed: {e}"), now);
+            state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Project", "Could not save project");
             false
         }
     }
@@ -94,8 +96,9 @@ pub fn run_pending(state: &mut UiState, action: Pending, ctx: &egui::Context, _n
                     Ok((s, warnings)) => {
                         state.set_session(s); state.welcome.remember(&path);
                         state.set_status(if warnings.is_empty() { format!("Opened {}", path.display()) } else { format!("Opened with {} warning(s): {}", warnings.len(), warnings[0]) }, _now);
+                        state.record_activity(if warnings.is_empty() { subcraft_app::activity::ActivityLevel::Info } else { subcraft_app::activity::ActivityLevel::Warning }, "Project", "Opened recent project");
                     }
-                    Err(e) => state.set_status(format!("Could not open recent file: {e}"), _now),
+                    Err(e) => { state.set_status(format!("Could not open recent file: {e}"), _now); state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Project", "Could not open recent project"); }
                 }
             }
         }
@@ -108,8 +111,9 @@ pub fn open_project(state: &mut UiState, path: &std::path::Path, now: f64) {
             state.set_session(s);
             state.welcome.remember(path);
             state.set_status(if state.session.project_path().is_none() { format!("Imported {} — save as a SubCraft project", path.display()) } else { format!("Opened {}", path.display()) }, now);
+            state.record_activity(subcraft_app::activity::ActivityLevel::Info, "Project", "Opened project");
         }
-        Err(e) => state.set_status(format!("Could not open project: {e}"), now),
+        Err(e) => { state.set_status(format!("Could not open project: {e}"), now); state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Project", "Could not open project"); }
     }
 }
 
@@ -242,13 +246,13 @@ pub fn export_window(state: &mut UiState, ctx: &egui::Context, now: f64) {
         if go.inner {
             #[cfg(not(target_arch = "wasm32"))]
             match state.session.export_textures(&folder, &settings) {
-                Ok(files) => state.set_status(format!("Exported {} files to {}", files.len(), folder.display()), now),
-                Err(e) => state.set_status(format!("Export failed: {e}"), now),
+                Ok(files) => { state.set_status(format!("Exported {} files to {}", files.len(), folder.display()), now); state.record_activity(subcraft_app::activity::ActivityLevel::Info, "Export", "Exported textures"); }
+                Err(e) => { state.set_status(format!("Export failed: {e}"), now); state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Export", "Texture export failed"); }
             }
             #[cfg(target_arch = "wasm32")]
             match state.session.export_archive(&settings) {
-                Ok(archive)=>if crate::web::download(&archive.name,&archive.bytes) {state.set_status(format!("Downloaded {} maps in {}",archive.files,archive.name),now);} else {state.set_status("Could not start the ZIP download; export again to retry",now);},
-                Err(e)=>state.set_status(format!("Export failed: {e}"),now),
+                Ok(archive)=>if crate::web::download(&archive.name,&archive.bytes) {state.set_status(format!("Downloaded {} maps in {}",archive.files,archive.name),now); state.record_activity(subcraft_app::activity::ActivityLevel::Info, "Export", "Exported textures");} else {state.set_status("Could not start the ZIP download; export again to retry",now); state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Export", "Texture export failed");},
+                Err(e)=>{state.set_status(format!("Export failed: {e}"),now); state.record_activity(subcraft_app::activity::ActivityLevel::Error, "Export", "Texture export failed");},
             }
         }
     });

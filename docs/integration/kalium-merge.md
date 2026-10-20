@@ -1,5 +1,12 @@
 # Kalium → SubCraft integration
 
+**Current format policy (2026-10-20):** the owner abandoned all Kalium formats.
+The native `.kalium` importer and in-progress `.kbrush` adapter have been removed.
+Useful editor capabilities are still transferred into SubCraft. Genuine SPP
+open/edit/save is the priority and remains unimplemented. Earlier migration
+notes below are historical and superseded.
+
+
 ## Owner decision and architecture
 
 2026-10-19: analyze both repositories, transfer all useful Kalium capabilities into SubCraft,
@@ -66,3 +73,37 @@ synthetic Python tests also pass. Workspace compilation (`cargo check --locked -
 Full workspace test execution and platform/runtime checks remain separate gates. All heavy commands use nice 19 and four CPUs.
 Original upstream results and Kalium's former 614-test result do not prove this
 combined app. The complete merge remains in progress.
+
+
+## 2026-10-20 transfer increment (before format scope change)
+
+Added persistent per-user Activity (separate from undo), bounded Kalium v1/v2
+brush import with embedded alpha tips and saved paint/mask behavior, plus CLI
+inspect/validate, exports, UV masks and selected-map baking. Brush import is
+exposed in Brush presets and Shelf → Brushes. Brush radius conversion is an
+approximation across the different engines; unsupported semantics reject.
+
+`cargo test --locked -p subcraft-app --lib --test brush_presets`, through the
+low-impact wrapper: **45 passed, zero failed**. This includes source-file
+immutability after CLI operations. Six synthetic SPP research tests pass.
+Native dialog interaction and Activity screenshots remain unverified. Headless
+preview and full transfer rows remain in progress; no full SPP support claim.
+
+
+## SPP focus after owner clarification
+
+Removed the Kalium project parser and all Kalium-specific open routes, filters
+and preset migration work. Explicit load/save guards reject `.kalium` and
+`.kbrush`; no native archive is written under those extensions. Core editor
+ports remain: Activity, headless workflows and editable Roughness graphs.
+Workspace compilation passes after removal (`cargo check --locked --workspace`,
+low-impact wrapper). The UI unit-test build was interrupted during dependency
+compilation to serialize validation of the new format direction; it is not a
+passing UI/runtime result. Genuine SPP read/write remains unimplemented.
+
+
+Validation after format removal: `cargo test --locked -p subcraft-app
+-p subcraft-project --lib --test procedural_graph` passed **76 tests**
+(39 app units, 3 graph command tests, 34 project units). Includes explicit
+Kalium format rejection and SPP source-preservation guards. Six synthetic Python
+research tests pass. All commands ran via the four-core nice-19 wrapper.

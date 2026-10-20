@@ -6,7 +6,7 @@ use egui::{RichText, Ui};
 use subcraft_app::Command;
 use subcraft_core::{ChannelKind, ChannelValue, MeshMapKind};
 use subcraft_doc::{
-    FillChannel, FillSource, Generator, GeneratorKind, LayerContent, Levels, MaskEffect, MaskEffectKind, ProceduralKind,
+    FillChannel, FillSource, Generator, GeneratorKind, Layer, LayerContent, Levels, MaskEffect, MaskEffectKind, ProceduralGraph, ProceduralKind, ProceduralNodeKind,
     PartMask, ProceduralParams, Projection, ProjectionMode,
 };
 
@@ -130,6 +130,10 @@ pub fn show(state: &mut UiState, ui: &mut Ui) {
         );
         cmds.extend(part_head);
         cmds.extend(part_cmds);
+
+        if let LayerContent::Paint(paint) = &layer.content {
+            procedural_graph_editor(ui, state, id, paint.procedural_graph.as_ref(), &mut cmds);
+        }
 
         match &layer.content {
             LayerContent::Paint(p) if p.path.is_some() => {
@@ -321,6 +325,109 @@ pub fn show(state: &mut UiState, ui: &mut Ui) {
             Err(e) => state.set_status(format!("Texture: {e}"), now),
         }
     }
+}
+
+fn procedural_graph_editor(
+    ui: &mut Ui,
+    state: &UiState,
+    layer_id: subcraft_core::LayerId,
+    graph: Option<&ProceduralGraph>,
+    cmds: &mut Vec<Command>,
+) {
+    section(ui, "procedural-roughness", "Procedural Roughness", true, |ui| {
+        let Some(graph) = graph else {
+            hint(ui, "Generate seeded Roughness from UV value noise. Painted Roughness remains on top.");
+            if secondary_button(ui, "Add seeded graph").clicked() {
+                cmds.push(Command::SetProceduralGraph {
+                    layer: layer_id,
+                    graph: Some(ProceduralGraph::value_noise(1, 4.0)),
+                });
+            }
+            return;
+        };
+
+        if let Err(error) = graph.validate() {
+            ui.colored_label(theme::WARNING, format!("This graph cannot be edited: {error}"));
+            hint(ui, "The stored graph is preserved. Remove it only if you want to discard it.");
+            if secondary_button(ui, "Remove graph").clicked() {
+                cmds.push(Command::SetProceduralGraph { layer: layer_id, graph: None });
+            }
+            return;
+        }
+
+        hint(ui, "Generated values fill untouched texels; authored Roughness is composited above them.");
+        let mut updated = graph.clone();
+        let Some((mut seed, mut scale)) = updated.nodes.iter().find_map(|node| match node.kind {
+            ProceduralNodeKind::ValueNoise { seed, scale } => Some((seed, scale)),
+            _ => None,
+        }) else {
+            ui.colored_label(theme::WARNING, "This graph has no value-noise node.");
+            return;
+        };
+        let mut changed = false;
+        prop_row(ui, "Seed", |ui| {
+            changed |= ui.add(egui::DragValue::new(&mut seed).speed(1.0).prefix("#")).changed();
+            if ui.small_button("Next seed").on_hover_text("Use the next deterministic noise seed").clicked() {
+                seed = seed.wrapping_add(1);
+                changed = true;
+            }
+        });
+        prop_row(ui, "Noise scale", |ui| {
+            changed |= ui.add(
+                egui::DragValue::new(&mut scale)
+                    .speed(0.1)
+                    .range(subcraft_doc::procedural::MIN_NOISE_SCALE..=subcraft_doc::procedural::MAX_NOISE_SCALE)
+                    .max_decimals(2),
+            ).changed();
+        });
+
+        let candidates = ao_sources(state, layer_id);
+        let mut source = updated.occlusion_source_layer_id();
+        let selected = source.and_then(|id| candidates.iter().find(|(candidate, _)| *candidate == id).map(|(_, name)| name.clone()))
+            .unwrap_or_else(|| if source.is_some() { "Missing AO source".into() } else { "Noise only".into() });
+        prop_row(ui, "AO source", |ui| {
+            egui::ComboBox::from_id_salt(("procedural-ao-source", layer_id))
+                .width(160.0)
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    changed |= ui.selectable_value(&mut source, None, "Noise only").changed();
+                    for (source_id, name) in &candidates {
+                        changed |= ui.selectable_value(&mut source, Some(*source_id), name).changed();
+                    }
+                });
+        });
+        hint(ui, "Reads raw AO paint from another layer in this texture set; source masks and visibility do not affect it.");
+
+        if changed {
+            updated.set_occlusion_source_layer_id(source);
+            for node in &mut updated.nodes {
+                if let ProceduralNodeKind::ValueNoise { seed: node_seed, scale: node_scale } = &mut node.kind {
+                    *node_seed = seed;
+                    *node_scale = scale;
+                }
+            }
+            cmds.push(Command::SetProceduralGraph { layer: layer_id, graph: Some(updated) });
+        }
+        if secondary_button(ui, "Remove graph").clicked() {
+            cmds.push(Command::SetProceduralGraph { layer: layer_id, graph: None });
+        }
+    });
+
+}
+
+fn ao_sources(state: &UiState, exclude: subcraft_core::LayerId) -> Vec<(subcraft_core::LayerId, String)> {
+    fn visit(layers: &[Arc<Layer>], exclude: subcraft_core::LayerId, out: &mut Vec<(subcraft_core::LayerId, String)>) {
+        for layer in layers {
+            if layer.id != exclude && matches!(&layer.content, LayerContent::Paint(paint) if paint.channels.contains_key(&ChannelKind::AmbientOcclusion)) {
+                out.push((layer.id, layer.name.clone()));
+            }
+            visit(layer.children(), exclude, out);
+        }
+    }
+    let mut out = Vec::new();
+    visit(&state.session.selected_texture_set().layers, exclude, &mut out);
+    out.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()).then_with(|| a.0.cmp(&b.0)));
+    out
 }
 
 pub(crate) fn effect_editor(ui: &mut Ui, state: &mut UiState, layer: subcraft_core::LayerId, e: &Arc<MaskEffect>, cmds: &mut Vec<Command>) {

@@ -108,10 +108,20 @@ pub struct UiState {
     pub recovery: crate::recovery::RecoveryUi,
     /// Help → Report a bug and crash reports of earlier runs.
     pub bug_report: crate::bug_report::BugReportUi,
+    /// Persistent per-user operation history; deliberately distinct from undo and diagnostics.
+    pub activity_log: Option<subcraft_app::activity::ActivityLog>,
+    pub activity_error: Option<String>,
 }
 
 impl UiState {
     pub fn new(mut session: Session, render_state: Option<egui_wgpu::RenderState>) -> Self {
+        let (activity_log, activity_error) = match subcraft_app::activity::default_path() {
+            Some(path) => match subcraft_app::activity::ActivityLog::load(path) {
+                Ok(log) => (Some(log), None),
+                Err(error) => (None, Some(format!("Activity history could not be loaded: {error}"))),
+            },
+            None => (None, None),
+        };
         let tool = if session.selected_layer().is_some_and(|l| l.kind() == subcraft_doc::LayerKind::Path) { Tool::Pen } else { Tool::Brush };
         // A brush color that stands out on the default gray material.
         session.brush.material.set(ChannelKind::BaseColor, subcraft_core::ChannelValue::rgb(0.85, 0.32, 0.06));
@@ -174,7 +184,17 @@ impl UiState {
             textures: Default::default(),
             recovery: crate::recovery::RecoveryUi::disabled(),
             bug_report: Default::default(),
+            activity_log,
+            activity_error,
         }
+    }
+
+    pub fn record_activity(&mut self, level: subcraft_app::activity::ActivityLevel, category: &str, message: &str) {
+        let Some(log) = self.activity_log.as_mut() else { return };
+        self.activity_error = match log.record(level, category, message) {
+            Ok(()) => None,
+            Err(error) => Some(format!("Activity history could not be saved: {error}")),
+        };
     }
 
     /// Add the library's alphas now and start loading its HDRIs in the background.

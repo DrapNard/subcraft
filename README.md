@@ -22,7 +22,7 @@ claim of complete Substance Painter compatibility.
 | GPU PBR viewport, HDRI/studio lighting, 2D UV view | Bounded archive and raster loading principles |
 | Sparse copy-on-write f16 tiled textures | Decoded-memory, tree and file limits |
 | Layer folders, per-channel blending, masks and effects | Failure-safe staging and SPP filename protection |
-| Projection brushes, symmetry, pen paths and parts workflow | Editable Kalium-project migration into SubCraft |
+| Projection brushes, symmetry, pen paths and parts workflow | Procedural Roughness graphs |
 | Baking, generators, smart materials, shelf and export | Controlled SPP format research and acceptance evidence |
 
 The [capability checklist](docs/integration/kalium-capabilities.md) tracks every
@@ -34,7 +34,8 @@ and CPU renderer are not installed as a second application inside SubCraft.
 
 The target project workflow is **open, edit and save genuine `.spp` files locally**.
 **SPP import and writing are not implemented yet.** SubCraft's current editable
-format is `.subcraft`; `.kalium` import is a migration path, not SPP compatibility.
+format remains `.subcraft` during development. Kalium project and brush formats
+are not supported; the interoperability target is genuine `.spp`.
 Saving to an `.spp` filename is rejected before writing to protect Painter files.
 
 The carried-over research harness creates private, original-geometry fixtures
@@ -90,22 +91,12 @@ Useful launch options:
 cargo run --release -- --demo
 cargo run --release -- path/to/model.obj
 cargo run --release -- path/to/project.subcraft
-cargo run --release -- path/to/project.kalium
 ```
 
 On Linux, install the native windowing/graphics dependencies described in
 [development](docs/development.md). A working Vulkan/Metal/DX12 backend or
 supported software renderer is needed. The old browser build is not the target
 of this integration.
-
-### Open a Kalium project
-
-Use **File → Open project** and select a supported `.kalium` file, or pass its
-path at launch. Import creates editable SubCraft content and requires **Save As**
-to a new `.subcraft` file. The original Kalium archive is not replaced.
-Unsupported semantics must return an actionable error; they must not silently
-flatten or discard artist data. Read the supported mappings in the integration
-record before migrating important projects.
 
 ## Development and verification
 
@@ -124,6 +115,13 @@ prove rendering correctness. Native file dialogs, tablet input, all supported
 platforms and production performance need separate runtime acceptance. Existing
 screenshots are historical unless the integration record explicitly identifies
 a new capture.
+
+## Transferred workflows
+
+A separate persistent **Activity** panel records project open/save and export
+outcomes. Headless commands include `inspect`, `validate`, `export`, `export-all`,
+`uv-mask` and `bake-mesh-maps`; run `subcraft --help` for arguments. These use
+SubCraft's session, bake and export systems. SPP remains unsupported.
 
 ## License, credits and product policy
 
