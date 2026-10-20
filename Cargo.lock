@@ -3893,6 +3893,7 @@ dependencies = [
  "half",
  "hdf5-metno",
  "hdf5-metno-sys",
+ "libc",
  "log",
  "serde",
  "serde_json",

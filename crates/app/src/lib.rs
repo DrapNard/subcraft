@@ -45,3 +45,6 @@ pub use subcraft_export::{ExportSettings, ExportTemplate, Padding};
 pub use subcraft_image::FileFormat;
 pub use subcraft_project::EXTENSION as PROJECT_EXTENSION;
 pub use subcraft_paint::Camera;
+
+#[cfg(all(feature = "spp-worker", not(target_arch = "wasm32")))]
+pub use subcraft_project::spp_worker;

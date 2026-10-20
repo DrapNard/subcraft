@@ -11,6 +11,7 @@ workspace = true
 [features]
 # Local update integration fixtures only; never enabled in shipped builds.
 update-fixture = []
+spp-worker = ["subcraft-project/spp-worker"]
 
 [dependencies]
 subcraft-core.workspace = true

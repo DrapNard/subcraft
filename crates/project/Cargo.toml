@@ -11,6 +11,7 @@ workspace = true
 [features]
 # Experimental native container research; default/community and browser builds stay independent.
 spp-hdf5 = ["dep:hdf5", "dep:hdf5-sys", "dep:sha2"]
+spp-worker = ["spp-hdf5", "dep:libc"]
 spp-hdf5-static = ["spp-hdf5", "hdf5/static"]
 
 [dependencies]
@@ -32,3 +33,6 @@ log.workspace = true
 hdf5 = { package = "hdf5-metno", version = "=0.14.1", optional = true, default-features = false }
 hdf5-sys = { package = "hdf5-metno-sys", version = "=0.12.3", optional = true, default-features = false }
 sha2 = { version = "=0.10.9", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = { version = "0.2", optional = true }

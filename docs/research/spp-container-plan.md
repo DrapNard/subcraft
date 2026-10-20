@@ -42,8 +42,60 @@ scripts/dev/low-impact cargo test --locked -p subcraft-project --features spp-hd
 `spp-hdf5-static` forwards the binding's static source build feature. It requires
 CMake and a C toolchain; static linkage and Windows/macOS packaging have not yet
 been verified. Linux CI has a dedicated optional-backend test job. The native
-metadata parser is not a sandbox; worker memory/time isolation remains required
-before exposing this backend to arbitrary files through the application UI.
+metadata parser is not a sandbox. An opt-in Linux worker now applies resource
+limits before parsing; Session/UI integration still remains.
+
+## Native worker boundary
+
+Build the desktop binary with `--features spp-worker` to enable the hidden
+`--spp-worker` dispatch before GUI/log initialization. Default and browser builds
+remain independent of HDF5. The host API is `spp_worker::{read_project,
+save_project_copy}`; it starts the trusted executable directly, without a shell.
+The native backend remains available for research callers but is not suitable for
+parsing arbitrary files in the GUI process.
+
+Each invocation serves one framed request. It checks the version, operation,
+lengths and trailing bytes; document payloads are capped at 64 KiB and scene
+payloads at 64 MiB. The host bounds stdout, drains stderr without retention,
+enforces a 120-second wall deadline, kills on failure and reaps the child.
+The host configures mimalloc to reserve arenas in 32 MiB increments at exec,
+rather than its 1 GiB default; otherwise the address-space cap would already be
+exceeded before parsing. Worker startup rejects an over-budget address space. The
+parent owns a private snapshot directory and removes it even on worker failure.
+Linux workers select at most four CPUs from their allowed affinity mask, set
+nice 19, and lower hard/soft limits to the smaller of their inherited limit and:
+512 MiB address space, 90 CPU seconds, 128 MiB per output file, 32 file descriptors
+and no core dumps. Other operating systems reject until an equivalent resource
+boundary is implemented. These limits need broader maximum-size corpus coverage.
+This is resource/process isolation, not a privilege or filesystem sandbox.
+
+Save requests retain the full source SHA-256, compare it in the worker, and use
+the combined atomic container transaction. Re-read the saved file to obtain a
+fresh revision for another save. A crash/timeout can happen after atomic publish
+and before acknowledgement: callers must inspect the destination rather than
+assume no commit occurred. A forcibly killed save may leave its private staging
+file beside the destination; parent snapshot cleanup does not remove that file.
+SPP Session provenance, recovery and user-facing open/save are still unfinished.
+
+Local acceptance uses the actual worker-enabled desktop executable and an owned
+full (not sparse) uniform-fill SPP: read both datasets and source digest, save a
+byte-exact no-op copy, change uniform Base Color plus UV together, reopen and
+compare both encoded datasets, preserve the source, and reject an external
+source-metadata change without changing the existing destination. All nine
+private corpus tests and 98 project unit tests pass with `spp-worker`. This is
+native-worker acceptance; no additional Painter-render or GUI acceptance is
+claimed for the worker in this checkpoint. A `/proc` runtime observation found
+one worker thread, four allowed CPUs and ~130 MiB startup virtual address space;
+the hard limits match those listed above. The initial 1 GiB-reservation failure
+was reproduced before the arena configuration fix.
+
+```sh
+scripts/dev/low-impact cargo build --locked -p subcraft --features spp-worker
+scripts/dev/low-impact env SUBCRAFT_SPP_RESEARCH_DIR=/absolute/private/corpus \
+  SUBCRAFT_SPP_WORKER_EXE=/absolute/path/to/target/debug/subcraft \
+  cargo test --locked -p subcraft-project --features spp-worker \
+  --lib --test spp_owned_corpus -- --include-ignored
+```
 
 ## Preservation and safety contract
 

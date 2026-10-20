@@ -61,5 +61,5 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install HDF5 development library
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libhdf5-dev
-      - name: Test bounded native SPP backend
-        run: cargo test --locked -p subcraft-project --features spp-hdf5 --lib
+      - name: Test bounded native SPP backend and worker protocol
+        run: cargo test --locked -p subcraft-project --features spp-worker --lib

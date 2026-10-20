@@ -354,3 +354,68 @@ fn owned_native_uniform_fill_color_edit_preserves_source() {
         target_color
     );
 }
+
+#[cfg(all(feature = "spp-worker", target_os = "linux"))]
+#[test]
+#[ignore = "requires SUBCRAFT_SPP_WORKER_EXE and the owned full uniform-fill SPP fixture"]
+fn owned_isolated_worker_reads_and_saves_combined_edits() {
+    use subcraft_project::{spp_container, spp_fill, spp_worker};
+    let root =
+        PathBuf::from(std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("private corpus"));
+    let executable = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_WORKER_EXE").expect("worker-enabled SubCraft executable"),
+    );
+    let original = root.join("single-fill-original-full.spp");
+    let original_bytes = std::fs::read(&original).unwrap();
+    let directory = std::env::temp_dir().join(format!(
+        "subcraft-spp-worker-corpus-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir(&directory).unwrap();
+    let source = directory.join("source.spp");
+    let target = directory.join("edited.spp");
+    std::fs::copy(&original, &source).unwrap();
+    let mut project = spp_worker::read_project(&executable, &source).unwrap();
+    let direct = spp_container::read_project(&source).unwrap();
+    assert_eq!(project.records, direct.records);
+    assert_eq!(
+        project.scene.encode().unwrap(),
+        direct.scene.encode().unwrap()
+    );
+    assert_eq!(project.source_digest(), direct.source_digest());
+    spp_worker::save_project_copy(&executable, &source, &target, &project).unwrap();
+    assert_eq!(std::fs::read(&target).unwrap(), original_bytes);
+    let uniform = spp_fill::enumerate_uniform_base_color_sources(&project.records).unwrap();
+    assert_eq!(uniform.len(), 1);
+    spp_fill::set_uniform_base_color_source(
+        &mut project.records,
+        uniform[0].uid,
+        [0.050876088, 0.116016142, 0.348510206],
+    )
+    .unwrap();
+    project.scene.meshes[0].uvs[0][0] = 0.875;
+    spp_worker::save_project_copy(&executable, &source, &target, &project).unwrap();
+    let saved = spp_worker::read_project(&executable, &target).unwrap();
+    assert_eq!(saved.records, project.records);
+    assert_eq!(
+        saved.scene.encode().unwrap(),
+        project.scene.encode().unwrap()
+    );
+    assert_eq!(std::fs::read(&source).unwrap(), original_bytes);
+    let target_bytes = std::fs::read(&target).unwrap();
+    let file = hdf5::File::open_rw(&source).unwrap();
+    file.new_attr::<u32>()
+        .create("subcraft-test-conflict")
+        .unwrap()
+        .write_scalar(&1)
+        .unwrap();
+    file.close().unwrap();
+    assert!(
+        spp_worker::save_project_copy(&executable, &source, &target, &project)
+            .unwrap_err()
+            .contains("revision changed")
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), target_bytes);
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    std::fs::remove_dir_all(directory).unwrap();
+}

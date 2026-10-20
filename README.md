@@ -50,7 +50,10 @@ writes same-size layer property and understood scene edits in copied SPP contain
 Controlled property and UV edits reopen in Painter; Painter mesh export confirms
 the changed UV, and Rust reads the saved return. A uniform Base Color source
 edit also passes Painter PNG pixel checks after derived-cache invalidation.
-Bounded scene/node/material codecs preserve unknown metadata. Full paint mapping and application open/save
+Bounded scene/node/material codecs preserve unknown metadata. An optional Linux
+worker (`--features spp-worker`) now isolates native read/save operations with
+resource limits; the actual desktop executable passes owned-SPP worker roundtrips.
+This feature does not yet enable SPP files in the editor. Full paint mapping and application open/save
 are still missing. See the [container checkpoint](docs/research/spp-container-plan.md).
 
 **Next format: Universal SPP (`.uspp`)**, after the native SPP workflow. Its ZIP

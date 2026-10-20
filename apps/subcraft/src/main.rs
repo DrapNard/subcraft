@@ -36,6 +36,10 @@ fn main() -> anyhow::Result<()> {
         let path = cli.get(1).ok_or_else(|| anyhow::anyhow!("Missing update job"))?;
         return subcraft_app::updater::apply_job(std::path::Path::new(path)).map_err(|e| anyhow::anyhow!("{e}"));
     }
+    #[cfg(feature = "spp-worker")]
+    if cli.first().is_some_and(|a| a == "--spp-worker") {
+        return subcraft_app::spp_worker::worker_main(&cli[1..]).map_err(anyhow::Error::msg);
+    }
     let headless_args: Vec<String> = std::env::args().skip(1).collect();
     if headless_args.first().is_some_and(|argument| argument == "preview") {
         return preview::run(&headless_args);

@@ -20,6 +20,8 @@ pub mod schema;
 pub mod spp_checksum;
 #[cfg(all(feature = "spp-hdf5", not(target_arch = "wasm32")))]
 pub mod spp_container;
+#[cfg(all(feature = "spp-worker", not(target_arch = "wasm32")))]
+pub mod spp_worker;
 pub mod spp_document;
 pub mod spp_semantics;
 pub mod spp_fill;

@@ -12,12 +12,20 @@ A combined container transaction now reads document and scene from one source
 revision and commits both edits atomically, avoiding lost edits between separate
 save operations. Regression tests cover combined edits, byte-exact no-op copies,
 stale-source conflicts and size-change rejection without replacing the target.
-96 project unit tests and eight private corpus tests pass with `spp-hdf5`;
-23 Python research tests pass. The default project suite passes 81 tests without
+An opt-in Linux subprocess now handles bounded native reads/saves before GUI
+startup, with four-core affinity, nice 19, memory/CPU/file/descriptor limits and a
+host deadline. The actual desktop executable passes owned full-SPP read,
+combined color/UV save, no-op byte preservation and external-change rejection.
+The first runtime test caught an allocator reservation conflict; configuring
+smaller mimalloc arenas at exec fixes it without raising the memory cap.
+The normal Session open/save path is still not connected to this worker.
+98 project unit tests and nine private corpus tests pass with `spp-worker`
+(which includes `spp-hdf5`). The previously verified Python research suite has
+23 passing tests. The default project suite passes 81 tests without
 HDF5, and workspace compilation passes. Full SPP editor support remains unfinished:
 Session/document/resource integration, nonblank strokes, masks/effects, broader
 channels/materials, non-identity transforms, length-changing writes, isolated
-native parsing and complete artist workflows remain required.
+native parsing on other platforms and complete artist workflows remain required.
 See [runtime evidence](research/spp-roundtrip.md),
 [container checkpoint](research/spp-container-plan.md), and
 [USPP audit](research/uspp-format.md). Historical upstream sections below do not
