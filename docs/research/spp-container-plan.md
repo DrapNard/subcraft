@@ -5,6 +5,18 @@ Status: experimental backend checkpoint, 2026-10-20. The optional native
 staged copies. Complete SPP project open/edit/save in SubCraft is unfinished.
 Length-changing writes reject; artist resources and unknown metadata are retained; derived render caches are invalidated on edits.
 
+## Coherent project transactions
+
+`read_project` returns document records and scene decoded from the same bounded
+source snapshot, with a retained SHA-256 source identity. `save_project_copy`
+encodes both, rejects length changes and stale sources, and writes both changed
+datasets plus checksums into one atomic staged copy. Derived caches are
+invalidated once using the original records. Both datasets are reopened and
+verified before publication. No-op copies avoid native writes and are byte-exact
+in the synthetic regression. This is a container API, not Session integration or
+full SPP editor support. The combined path has synthetic regression coverage;
+Painter runtime evidence currently covers the individual edits described below.
+
 ## Established prerequisites
 
 - Bounded Rust reflective dataset decoder/encoder, with exact private-corpus

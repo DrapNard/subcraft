@@ -8,7 +8,11 @@ reads/writes the understood scene geometry, hierarchy/material records and unifo
 Base Color source data. Controlled geometry UV and fill-color edits pass Painter
 reopen/reverse checks. The fill regression also verifies exported PNG pixels;
 derived texture-cache invalidation was required to avoid stale rendered colors.
-94 project unit tests and eight private corpus tests pass with `spp-hdf5`;
+A combined container transaction now reads document and scene from one source
+revision and commits both edits atomically, avoiding lost edits between separate
+save operations. Regression tests cover combined edits, byte-exact no-op copies,
+stale-source conflicts and size-change rejection without replacing the target.
+96 project unit tests and eight private corpus tests pass with `spp-hdf5`;
 23 Python research tests pass. The default project suite passes 81 tests without
 HDF5, and workspace compilation passes. Full SPP editor support remains unfinished:
 Session/document/resource integration, nonblank strokes, masks/effects, broader

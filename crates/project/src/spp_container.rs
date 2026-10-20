@@ -7,11 +7,11 @@
 //! in an isolated worker with memory/time limits before exposing arbitrary files.
 use crate::{
     spp_checksum::spp_dataset_checksum,
-    spp_document::{MAX_DATASET_BYTES, SppDocumentRecords},
+    spp_document::{SppDocumentRecords, MAX_DATASET_BYTES},
     spp_scene::SppScene,
 };
 use hdf5::types::{IntSize, TypeDescriptor};
-use hdf5::{Dataset, Group, LinkType, plist::dataset_create::Layout};
+use hdf5::{plist::dataset_create::Layout, Dataset, Group, LinkType};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
@@ -65,6 +65,101 @@ pub struct SppContainerDocument {
 pub struct SppContainerScene {
     pub scene: SppScene,
     container_digest: [u8; 32],
+}
+
+/// Coherent document and scene from one source revision. This is not an editor importer.
+#[derive(Clone, Debug)]
+pub struct SppContainerProject {
+    pub records: SppDocumentRecords,
+    pub scene: SppScene,
+    original_document_bytes: Vec<u8>,
+    original_scene_bytes: Vec<u8>,
+    container_digest: [u8; 32],
+}
+impl SppContainerProject {
+    pub fn source_digest(&self) -> [u8; 32] {
+        self.container_digest
+    }
+}
+
+/// Decode both understood datasets from the same bounded snapshot.
+pub fn read_project(path: &Path) -> Result<SppContainerProject> {
+    let snapshot = SourceSnapshot::new(path)?;
+    with_plugins_disabled(|| read_project_snapshot(&snapshot.path, snapshot.digest))
+}
+fn read_project_snapshot(path: &Path, digest: [u8; 32]) -> Result<SppContainerProject> {
+    let document = read_snapshot(path)?;
+    let original_scene_bytes = read_scene_snapshot(path)?;
+    Ok(SppContainerProject {
+        records: document.records,
+        scene: SppScene::decode(&original_scene_bytes)?,
+        original_document_bytes: document.original_bytes,
+        original_scene_bytes,
+        container_digest: digest,
+    })
+}
+
+/// Commit document and scene edits together, preserving opaque artist payloads.
+/// Both encodings must retain their original length. A stale source rejects before publication.
+pub fn save_project_copy(
+    source: &Path,
+    target: &Path,
+    project: &SppContainerProject,
+) -> Result<()> {
+    if !target
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("spp"))
+    {
+        return Err(SppContainerError::Unsupported(
+            "output must have an .spp extension",
+        ));
+    }
+    let document = project.records.encode()?;
+    let scene = project.scene.encode()?;
+    if document.len() != project.original_document_bytes.len()
+        || scene.len() != project.original_scene_bytes.len()
+    {
+        return Err(SppContainerError::Unsupported(
+            "size-changing project writes are not implemented",
+        ));
+    }
+    let snapshot = SourceSnapshot::new(source)?;
+    if snapshot.digest != project.container_digest {
+        return Err(SppContainerError::SourceChanged);
+    }
+    with_plugins_disabled(|| {
+        let original = read_project_snapshot(&snapshot.path, snapshot.digest)?;
+        stage_copy_and_replace(source, target, &snapshot, |stage| {
+            let document_changed = document != original.original_document_bytes;
+            let scene_changed = scene != original.original_scene_bytes;
+            if document_changed || scene_changed {
+                let file = hdf5::File::open_rw(stage)?;
+                if document_changed {
+                    let ds = checked_dataset(&file)?;
+                    ds.write_raw(&document)?;
+                    ds.attr(CHECKSUM)?
+                        .write_raw(&spp_dataset_checksum(&document))?;
+                }
+                if scene_changed {
+                    let ds =
+                        checked_byte_dataset(&file, SCENE_CHILD, MAX_SCENE_BYTES, MIN_SCENE_BYTES)?;
+                    ds.write_raw(&scene)?;
+                    ds.attr(CHECKSUM)?
+                        .write_raw(&spp_dataset_checksum(&scene))?;
+                }
+                invalidate_texture_cache(&file, &original.records)?;
+                file.flush()?;
+                file.close()?;
+            }
+            let verified = read_project_snapshot(stage, snapshot.digest)?;
+            if verified.original_document_bytes != document
+                || verified.original_scene_bytes != scene
+            {
+                return Err(SppContainerError::SourceChanged);
+            }
+            Ok(())
+        })
+    })
 }
 
 fn file_preflight(path: &Path) -> Result<()> {
@@ -634,6 +729,54 @@ mod tests {
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+    #[test]
+    fn project_transaction_retains_both_edits_and_rejects_stale_source() {
+        let tmp = Temp::new();
+        let source = tmp.path("source.spp");
+        let target = tmp.path("target.spp");
+        fixture(&source, false);
+        let original = std::fs::read(&source).unwrap();
+        let mut project = read_project(&source).unwrap();
+        project.records.root.as_mut().unwrap().fields[0] = SppRecordValue::Utf8("Modified".into());
+        project.scene.meshes[0].positions[1][0] = 1.25;
+        save_project_copy(&source, &target, &project).unwrap();
+        let loaded = read_project(&target).unwrap();
+        assert_eq!(loaded.records, project.records);
+        assert_eq!(
+            loaded.scene.encode().unwrap(),
+            project.scene.encode().unwrap()
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), original);
+        let committed = std::fs::read(&target).unwrap();
+        let file = hdf5::File::open_rw(&source).unwrap();
+        file.attr("future-root-attribute")
+            .unwrap()
+            .write_scalar(&42_u32)
+            .unwrap();
+        file.close().unwrap();
+        assert!(matches!(
+            save_project_copy(&source, &target, &project),
+            Err(SppContainerError::SourceChanged)
+        ));
+        assert_eq!(std::fs::read(&target).unwrap(), committed);
+    }
+
+    #[test]
+    fn project_noop_is_byte_exact_and_size_change_preserves_target() {
+        let tmp = Temp::new();
+        let source = tmp.path("source.spp");
+        let target = tmp.path("target.spp");
+        fixture(&source, false);
+        let mut project = read_project(&source).unwrap();
+        save_project_copy(&source, &target, &project).unwrap();
+        let original = std::fs::read(&source).unwrap();
+        assert_eq!(std::fs::read(&target).unwrap(), original);
+        project.records.root.as_mut().unwrap().fields[0] =
+            SppRecordValue::Utf8("Longer label".into());
+        assert!(save_project_copy(&source, &target, &project).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), original);
+    }
+
     fn records() -> SppDocumentRecords {
         SppDocumentRecords {
             header: SppDocumentHeader {
@@ -883,11 +1026,9 @@ mod tests {
         }
         let mut document = read_document(&source).unwrap();
         save_document_copy(&source, &target, &document).unwrap();
-        assert!(
-            hdf5::File::open(&target)
-                .unwrap()
-                .link_exists("texture-cache/material/derived")
-        );
+        assert!(hdf5::File::open(&target)
+            .unwrap()
+            .link_exists("texture-cache/material/derived"));
         document.records.root.as_mut().unwrap().fields[0] =
             crate::spp_document::SppRecordValue::Utf8("SubCraft".into());
         save_document_copy(&source, &target, &document).unwrap();
@@ -910,11 +1051,9 @@ mod tests {
                 .unwrap(),
             [7, 9, 11, 13]
         );
-        assert!(
-            hdf5::File::open(&source)
-                .unwrap()
-                .link_exists("texture-cache/material/derived")
-        );
+        assert!(hdf5::File::open(&source)
+            .unwrap()
+            .link_exists("texture-cache/material/derived"));
     }
     #[test]
     fn unsafe_cache_links_and_pins_fail_without_replacing_target() {
