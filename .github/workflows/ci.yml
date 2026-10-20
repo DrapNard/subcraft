@@ -51,3 +51,15 @@ jobs:
         run: cargo build --locked --workspace
       - name: Engine tests
         run: cargo test --locked -p subcraft-core -p subcraft-image -p subcraft-mesh -p subcraft-doc -p subcraft-materials -p subcraft-compositor -p subcraft-paint -p subcraft-bake -p subcraft-project -p subcraft-export -p subcraft-assets -p subcraft-app
+
+  spp-native:
+    name: Experimental SPP container (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install HDF5 development library
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libhdf5-dev
+      - name: Test bounded native SPP backend
+        run: cargo test --locked -p subcraft-project --features spp-hdf5 --lib

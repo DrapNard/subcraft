@@ -1,7 +1,7 @@
 name: Web
 
-# Builds the web version (WebAssembly + WebGPU) on every pull request, and publishes it to
-# GitHub Pages (https://aalzard.github.io/subcraft/) when main changes.
+# Build the browser target on pushes/PRs. Pages deployment is explicit opt-in
+# for repositories with Pages configured (ENABLE_GITHUB_PAGES=true).
 on:
   push:
     branches: [main]
@@ -43,7 +43,7 @@ jobs:
 
   deploy:
     name: Publish to GitHub Pages
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.ENABLE_GITHUB_PAGES == 'true'
     needs: build
     runs-on: ubuntu-latest
     permissions:

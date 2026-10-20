@@ -118,7 +118,6 @@ mod tests {
     use super::*;
     use std::{
         fs,
-        path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
     static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
@@ -156,7 +155,8 @@ mod tests {
         );
         state.activity_log = Some(log);
         let ctx = egui::Context::default();
-        let output = ctx.run(
+        theme::apply(&ctx);
+        let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
@@ -164,10 +164,9 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| show(&mut state, ui));
-            },
+            |ui| show(&mut state, ui),
         );
+        output.textures_delta.clear();
         let text = output
             .shapes
             .iter()

@@ -26,6 +26,20 @@ class CodecTests(unittest.TestCase):
         edited = Reader(bytes(writer.b)).object()
         self.assertEqual(edited["fields"], obj["fields"])
 
+    def test_opaque16_color_and_channel_tokens_reencode_exactly(self):
+        header = bytes.fromhex("dd2f7c1b") + struct.pack("<IIII", 1, 55, 18, 1)
+        classes = [("DataTest", [("color",4),("channelTypes",22)])]
+        obj = {"class":"DataTest", "fields":{"color":"00"*16, "channelTypes":"01"+"00"*15}}
+        writer = Writer(header, classes)
+        writer.object(obj)
+        data = bytes(writer.b)
+        reader = Reader(data)
+        decoded = reader.object()
+        self.assertEqual(decoded["fields"], obj["fields"])
+        writer = Writer(data, reader.classes)
+        writer.object(decoded)
+        self.assertEqual(bytes(writer.b), data)
+
     def test_truncation_rejected(self):
         data = self.fixture()
         for size in range(len(data)):

@@ -1,7 +1,9 @@
 # Next SPP container integration
 
-Status: design checkpoint, 2026-10-20. No HDF5 dependency is currently added to
-SubCraft. Genuine SPP open/save remains unimplemented.
+Status: experimental backend checkpoint, 2026-10-20. The optional native
+`spp-hdf5` backend now reads and writes the understood document dataset in
+staged copies. Complete SPP project open/edit/save in SubCraft is unfinished.
+Length-changing writes reject; existing datasets/attributes stay in place.
 
 ## Established prerequisites
 
@@ -12,19 +14,24 @@ SubCraft. Genuine SPP open/save remains unimplemented.
 - A layer-name edit made outside Painter and rehashed in a copied container
   reopens editable in Painter. See [evidence](spp-roundtrip.md).
 
-## Container backend candidate
+## Container backend
 
-Prefer the official HDF5 library behind a narrow, isolated Rust adapter. Review
-and pin the maintained [metno Rust binding](https://github.com/metno/hdf5-rust)
-before adding dependencies. Its [sys crate documents static builds](https://docs.rs/crate/hdf5-metno-sys/0.12.3)
-and currently describes HDF5 2.0.0 as the bundled version; verify the actual pinned
-source and license notices. This is a candidate, not a dependency decision or
-cross-platform build result. The older aldanor wrapper's historical bundled
-version is not sufficient evidence for current system HDF5 2.x compatibility.
+The backend pins `hdf5-metno` 0.14.1 and `hdf5-metno-sys` 0.12.3. Local Linux
+validation uses the installed HDF5 2.2.0 library. The locked optional source
+package is `hdf5-metno-src` 0.10.4, whose headers identify HDF5 2.2.0 (the earlier
+online build notes described 2.0.0). Its license is retained under `licenses/`.
+The maintained [binding](https://github.com/metno/hdf5-rust) wraps the official C
+library; it is not enabled by default or required for browser/community builds.
 
-A source build needs CMake and a C toolchain. Keep Linux, Windows and macOS
-packaging explicit and retain the community build path. Browser support must
-not accidentally acquire an unavailable native dependency.
+```sh
+scripts/dev/low-impact cargo test --locked -p subcraft-project --features spp-hdf5 --lib
+```
+
+`spp-hdf5-static` forwards the binding's static source build feature. It requires
+CMake and a C toolchain; static linkage and Windows/macOS packaging have not yet
+been verified. Linux CI has a dedicated optional-backend test job. The native
+metadata parser is not a sandbox; worker memory/time isolation remains required
+before exposing this backend to arbitrary files through the application UI.
 
 ## Preservation and safety contract
 
@@ -45,7 +52,8 @@ not accidentally acquire an unavailable native dependency.
 5. Treat link semantics separately from object copying; [H5Ocopy](https://support.hdfgroup.org/documentation/hdf5/latest/group___h5_o.html)
    does not automatically establish safe preservation of external/soft links.
 6. Recalculate the understood checksum, flush/close, reopen and validate staging,
-   then fsync and atomically replace. Any error/cancel keeps the source intact.
+   then fsync and atomically replace. Pre-commit failures preserve the target. A post-replacement directory-sync
+   failure returns `CommittedButNotSynced`, explicitly reporting that commit occurred.
 
 ## Next acceptance fixtures
 
@@ -53,7 +61,8 @@ Broaden beyond a blank paint layer: original authored strokes, Fill, mask, group
 multiple channels and texture sets, resource references, and incremental saves.
 Then map mesh/document data into SubCraft's existing Session without flattening,
 retain unsupported artist data, and prove edited roundtrips in both directions.
-The one controlled rename is a prerequisite result, not a general format claim.
+The controlled three-property Rust → Painter → Rust round trip is a prerequisite
+result, not a general format claim.
 
 The optional private Rust test requires six `*.document.bin` extracts and matching
 `*.checksum.txt` files containing the two decimal attribute words. No private
@@ -63,3 +72,18 @@ Painter data is bundled:
 scripts/dev/low-impact env SUBCRAFT_SPP_RESEARCH_DIR=/absolute/private/corpus \
   cargo test --locked -p subcraft-project --test spp_owned_corpus -- --ignored
 ```
+
+
+### Current source identity protection
+
+Read from a private bounded snapshot while retaining a shared source lock.
+Disable HDF5 plugins only within the serialized native operation, then restore
+previous plugin state. Documents carry a private full-container SHA-256 identity;
+reject saves from an older source, including resource-only changes. Recheck the
+staged copy and live source before replacement. Preserve output permissions.
+These checks detect cooperating and observed noncooperating changes; advisory
+locks cannot prevent every hostile external writer race.
+
+Browser CI builds remain enabled. Pages deployment now requires the repository
+variable `ENABLE_GITHUB_PAGES=true`, because this fork has no configured Pages
+site; this does not change browser application behavior.

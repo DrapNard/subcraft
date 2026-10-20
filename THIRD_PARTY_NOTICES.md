@@ -27,3 +27,20 @@ in `assets/starter-pack/CREDITS-CC0.txt`; fonts and icon source notices remain
 with their upstream resources. No Adobe source, shaders, branding assets or
 bundled project resources are incorporated by this merge. SPP research fixtures
 remain private. No images were generated for this integration.
+
+
+## Optional native SPP container backend
+
+The experimental `spp-hdf5` feature uses `hdf5-metno` 0.14.1 and
+`hdf5-metno-sys` 0.12.3 ([upstream](https://github.com/metno/hdf5-rust)),
+under their MIT OR Apache-2.0 terms. System-linked builds use the installed
+HDF5 library; package its applicable notices with distributed binaries.
+The `spp-hdf5-static` feature can build HDF5 from the locked
+`hdf5-metno-src` 0.10.4 sources (HDF5 2.2.0). HDF5's full notice is retained in
+`licenses/HDF5-LICENSE.txt`; it identifies The HDF Group and the University of
+Illinois and includes the 3-clause BSD terms. Static/platform packaging has not
+yet been accepted. Default application/browser builds do not enable this backend.
+
+Universal Painter Files was reviewed as an MIT-licensed format reference for
+future USPP compatibility. Its source/assets are not bundled or executed by
+SubCraft. The pinned audit and links are in `docs/research/uspp-format.md`.

@@ -50,6 +50,7 @@ class Reader:
    v=struct.unpack('<f',self.take(4))[0]
    if not math.isfinite(v):raise ValueError('float')
    return v
+  if t in (4,22):return self.take(16).hex()
   if t==6:return [self.u32(),self.u32()]
   if t==9:return self.u32()
   if t==10:
@@ -87,6 +88,10 @@ class Writer:
   if pointer:struct.pack_into('<I',self.b,start,len(self.b))
  def value(self,t,v):
   if t==1:self.b.extend(struct.pack('<f',v))
+  elif t in (4,22):
+   raw=bytes.fromhex(v)
+   if len(raw)!=16:raise ValueError('invalid opaque16 size')
+   self.b.extend(raw)
   elif t==6:
    for n in v:self.u32(n)
   elif t==9:self.u32(v)

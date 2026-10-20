@@ -212,3 +212,41 @@ owned extracts, checking both exact reencoding and the HDF5 attribute checksum.
 Eight synthetic Python research tests pass. Full workspace compilation passes.
 All local heavy validation uses nice 19 and four CPUs. The next container work
 is specified in [the integration checkpoint](spp-container-plan.md).
+
+
+## Native property round trip — 2026-10-20
+
+The optional Rust `spp-hdf5` backend edited an owned SPP copy: layer name
+`SubCraft`, visibility false and Base Color opacity 0.625. Painter reopened it,
+reported those values, changed them to `Painter2`, true and 0.25, and saved a
+full copy. Rust decoded the returned properties correctly. The original source
+and Rust-edited input were unchanged by the corresponding copy operations.
+
+Rust output SHA-256:
+`239484a5719f93146d1be4425c07018869e6aae3d1e1c79c2bd4484cb8db53ec`.
+Painter return SHA-256:
+`eb77c4d7b398cb26339c90b9f8307890aa6ee4bf71edf38d1befc4d0e71e8c39`.
+REA evidence: `ev_9fe617b718c49cab8033a70a844dc4fb89e9558a9e4c5a6bc6807b48a4870175`, exit 0.
+The return records identify last-save version 12.1.5; their source creation
+version was 11.1.3. Executable identity was unavailable to this probe, process
+sampling was incomplete, and filesystem snapshots were not collected. Explicit
+probe SHA checks provide narrower evidence than a complete filesystem trace.
+
+The returned document introduced 16-byte record types 4 and 22. Both now round
+trip as opaque bytes; the public Universal Painter Files primitive tables and
+complete owned-record boundaries corroborate the widths. Layer Base Color
+mapping accepts only the observed exact type-22 token; unknown combinations
+reject. This does not establish arbitrary channel semantics.
+
+Verification: 65 project unit tests and three private corpus integration tests
+pass with `spp-hdf5`, including reverse properties, archive preservation and
+stale-source rejection. Private fixtures remain outside Git.
+
+Five original controlled mesh fixtures (baseline, vertex, UV, normal and triangle
+changes) were saved by an owned Painter 12.1.5 process. Evidence:
+`ev_054dfcf6ad9a5dcc995faf490770404ce2be8c38bf9f76b1c9d05c4a163a1052`, exit 0.
+The harness and synthetic tests are committed; mesh decoding is not implemented.
+
+Remaining: mesh/resource/Session mapping, strokes/fills/masks, broader channel
+coverage, length-changing writes, isolated native parsing and full editor
+open/edit/save acceptance. USPP is the subsequent phase; see [audit](uspp-format.md).

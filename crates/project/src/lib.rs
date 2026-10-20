@@ -18,7 +18,10 @@ pub mod limits;
 pub mod raster;
 pub mod schema;
 pub mod spp_checksum;
+#[cfg(all(feature = "spp-hdf5", not(target_arch = "wasm32")))]
+pub mod spp_container;
 pub mod spp_document;
+pub mod spp_semantics;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, Write};
@@ -493,10 +496,22 @@ pub fn save_project(
 }
 
 fn reject_spp_save_path(path: &Path) -> Result<(), ProjectError> {
-    if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
-        matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush")
-    }) {
-        return Err(ProjectError::Invalid("Kalium formats are not supported".into()));
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("uspp"))
+    {
+        return Err(ProjectError::Invalid(
+            "Universal SPP .uspp support follows native SPP integration; not implemented".into(),
+        ));
+    }
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush"))
+    {
+        return Err(ProjectError::Invalid(
+            "Kalium formats are not supported".into(),
+        ));
     }
     if path
         .extension()
@@ -566,6 +581,21 @@ fn write_stage_and_replace(
 
 #[cfg(unix)]
 fn replace_file(staged: &Path, target: &Path) -> Result<(), ProjectError> {
+    // `rename` installs the staged inode, so it would otherwise replace the target's
+    // permissions with the staging file's umask-derived permissions. Preserve the mode
+    // of an existing regular file before the atomic commit.
+    match std::fs::symlink_metadata(target) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                staged,
+                std::fs::Permissions::from_mode(metadata.permissions().mode()),
+            )?;
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(ProjectError::Io(error)),
+    }
     std::fs::rename(staged, target)?;
     Ok(())
 }
@@ -599,7 +629,7 @@ fn replace_file(staged: &Path, target: &Path) -> Result<(), ProjectError> {
             target_w.as_ptr(),
             staged_w.as_ptr(),
             ptr::null(),
-            0x1,
+            0,
             ptr::null_mut(),
             ptr::null_mut(),
         )
@@ -844,7 +874,11 @@ impl<R: Read + Seek> Loader<'_, R> {
             }
         };
         let content = match &l.content {
-            ContentV1::Paint { channels, path, procedural_graph } => {
+            ContentV1::Paint {
+                channels,
+                path,
+                procedural_graph,
+            } => {
                 let mut p = PaintContent::default();
                 if let Some(path) = path {
                     let source = subcraft_doc::PenPath {
@@ -878,7 +912,9 @@ impl<R: Read + Seek> Loader<'_, R> {
                 }
                 p.channels = self.paint_channels(channels, res)?;
                 if let Some(graph) = procedural_graph {
-                    graph.validate().map_err(|error| ProjectError::Invalid(error.to_string()))?;
+                    graph
+                        .validate()
+                        .map_err(|error| ProjectError::Invalid(error.to_string()))?;
                 }
                 p.procedural_graph = procedural_graph.clone();
                 LayerContent::Paint(p)
@@ -998,9 +1034,15 @@ fn validate_document_references(
             }
         }
         match &layer.content {
-            ContentV1::Paint { channels, procedural_graph, .. } => {
+            ContentV1::Paint {
+                channels,
+                procedural_graph,
+                ..
+            } => {
                 if let Some(graph) = procedural_graph {
-                    graph.validate().map_err(|error| ProjectError::Invalid(error.to_string()))?;
+                    graph
+                        .validate()
+                        .map_err(|error| ProjectError::Invalid(error.to_string()))?;
                 }
                 for channel in channels {
                     validate_raster_reference(&channel.raster, directory)?;
@@ -1174,10 +1216,22 @@ pub fn load_project(path: &Path) -> Result<ProjectData, ProjectError> {
 }
 
 fn reject_spp_load_path(path: &Path) -> Result<(), ProjectError> {
-    if path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
-        matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush")
-    }) {
-        return Err(ProjectError::Invalid("Kalium formats are not supported".into()));
+    if path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("uspp"))
+    {
+        return Err(ProjectError::Invalid(
+            "Universal SPP .uspp support follows native SPP integration; not implemented".into(),
+        ));
+    }
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "kalium" | "kbrush"))
+    {
+        return Err(ProjectError::Invalid(
+            "Kalium formats are not supported".into(),
+        ));
     }
     if path
         .extension()

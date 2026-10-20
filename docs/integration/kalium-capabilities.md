@@ -3,6 +3,7 @@
 Owner clarification, 2026-10-20: **SubCraft is the main app and must receive all
 useful Kalium functionality.** Import and archive safety alone are insufficient.
 The first priority is genuine editable SPP and everything required for it.
+Universal SPP (`.uspp`) follows native SPP, per the owner’s latest instruction.
 
 Latest owner decision: **abandon all Kalium formats**. `.kalium` and `.kbrush`
 adapters are removed from scope and active code. Editor capabilities remain
@@ -16,8 +17,8 @@ integration acceptance. Nothing below is waived by choosing a different engine.
 
 | Capability | Current evidence | Required next evidence |
 |---|---|---|
-| Real editable open/save | Missing in both apps | SubCraft → Painter → SubCraft edited round trip |
-| Container/record contract | Bounded Rust record codec; six checksum matches; externally edited layer name reopened in Painter | Container integration and broader record semantics |
+| Real editable open/save | Experimental native property reader/writer; full editor mapping missing | SubCraft → Painter → SubCraft edited round trip |
+| Container/record contract | Bounded Rust codec/checksums and optional HDF5 backend; edited properties reopen in Painter | Container integration and broader record semantics |
 | Layers, channels, masks, fills, materials and mesh | SubCraft models exist; SPP mappings missing | Editable data matches oracle state and exported maps |
 | Opaque and unknown records/resources | Preservation policy only | Unknown objects survive known edits byte/semantically intact |
 | Atomic save and original preservation | Native safety changes pending validation | Failed/canceled SPP writes preserve original; real SPP staging |

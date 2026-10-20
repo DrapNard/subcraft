@@ -33,7 +33,7 @@ and CPU renderer are not installed as a second application inside SubCraft.
 ## Priority: real SPP open and save
 
 The target project workflow is **open, edit and save genuine `.spp` files locally**.
-**SPP import and writing are not implemented yet.** SubCraft's current editable
+**Complete SPP project open/edit/save in the application is not implemented yet.** SubCraft's current editable
 format remains `.subcraft` during development. Kalium project and brush formats
 are not supported; the interoperability target is genuine `.spp`.
 Saving to an `.spp` filename is rejected before writing to protect Painter files.
@@ -45,9 +45,14 @@ recognition is not a semantic importer. See [SPP research](docs/research/spp-rou
 A Painter-dependent bridge or flattened texture extraction does not meet the
 standalone editable SPP goal.
 
-Research progress: a bounded Rust internal-record codec and dataset checksum
-are tested, and an externally edited layer-name fixture reopens in Painter.
-This narrow experiment is not SubCraft project import/save support.
+Research progress: the optional native Rust backend reads verified records and
+writes same-size layer property edits in copied SPP containers. Controlled edits
+reopen in Painter. Full document/mesh/paint mapping and application open/save are
+still missing. See the [container checkpoint](docs/research/spp-container-plan.md).
+
+**Next format: Universal SPP (`.uspp`)**, after the native SPP workflow. Its ZIP
+schema and preservation limits are [audited](docs/research/uspp-format.md); USPP
+import/export is not implemented yet.
 
 ## Painting and materials
 

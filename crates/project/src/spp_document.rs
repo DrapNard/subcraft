@@ -95,6 +95,8 @@ pub struct SppClassDefinition {
 pub enum SppRecordValue {
     /// Exact little-endian IEEE-754 payload bits, without float conversion.
     F32Bits(u32),
+    /// Fixed 16-byte primitive payload, preserved without assigning component semantics.
+    Opaque16([u8; 16]),
     U32Pair([u32; 2]),
     U32(u32),
     Bool(bool),
@@ -268,7 +270,7 @@ fn validate_text(value: &str, cap: usize) -> Result<(), SppDocumentError> {
 
 fn check_supported_type(type_code: u32) -> Result<(), SppDocumentError> {
     match type_code {
-        1 | 6 | 9 | 10 | 11 | 12 | 15 | 16 | 17 | 18 | 19 | 20 | 21 => Ok(()),
+        1 | 4 | 6 | 9 | 10 | 11 | 12 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 => Ok(()),
         other => Err(SppDocumentError::UnknownType(other)),
     }
 }
@@ -423,6 +425,10 @@ impl Reader<'_> {
     ) -> Result<SppRecordValue, SppDocumentError> {
         Ok(match type_code {
             1 => SppRecordValue::F32Bits(self.u32()?),
+            4 | 22 => {
+                let bytes = self.take(16)?;
+                SppRecordValue::Opaque16(bytes.try_into().map_err(|_| SppDocumentError::Truncated)?)
+            }
             6 => SppRecordValue::U32Pair([self.u32()?, self.u32()?]),
             9 => SppRecordValue::U32(self.u32()?),
             10 => match self.u8()? {
@@ -601,6 +607,7 @@ impl Writer<'_> {
     ) -> Result<(), SppDocumentError> {
         match (type_code, value) {
             (1, SppRecordValue::F32Bits(bits)) => self.put_u32(*bits),
+            (4 | 22, SppRecordValue::Opaque16(bytes)) => self.put(bytes),
             (6, SppRecordValue::U32Pair(values)) => {
                 self.put_u32(values[0])?;
                 self.put_u32(values[1])
@@ -834,15 +841,15 @@ mod tests {
     #[test]
     fn rejects_unknown_types_nonempty_type_11_and_invalid_bool_encodings() {
         let mut unknown = fixture();
-        unknown.classes[0].properties[0].type_code = 22;
-        assert_eq!(unknown.encode(), Err(SppDocumentError::UnknownType(22)));
+        unknown.classes[0].properties[0].type_code = 23;
+        assert_eq!(unknown.encode(), Err(SppDocumentError::UnknownType(23)));
 
         let mut unknown_input = raw_fixture();
         // Synthetic layout: first property type word follows the name at bytes 48..52.
-        unknown_input[52..56].copy_from_slice(&22u32.to_le_bytes());
+        unknown_input[52..56].copy_from_slice(&23u32.to_le_bytes());
         assert_eq!(
             SppDocumentRecords::decode(&unknown_input),
-            Err(SppDocumentError::UnknownType(22))
+            Err(SppDocumentError::UnknownType(23))
         );
 
         let mut nonempty = fixture();
@@ -890,6 +897,51 @@ mod tests {
         assert_eq!(
             SppDocumentRecords::decode(&bytes),
             Err(SppDocumentError::CountLimit)
+        );
+    }
+
+    #[test]
+    fn opaque_16_byte_types_four_and_twenty_two_roundtrip_exactly() {
+        let value4 = [0xA5; 16];
+        let value22 = [0x5A; 16];
+        let records = SppDocumentRecords {
+            header: fixture().header,
+            classes: vec![SppClassDefinition {
+                name: "DataOpaque".into(),
+                properties: vec![
+                    SppPropertyDefinition {
+                        name: "value4".into(),
+                        type_code: 4,
+                    },
+                    SppPropertyDefinition {
+                        name: "value22".into(),
+                        type_code: 22,
+                    },
+                ],
+            }],
+            root: Some(SppObject {
+                class_index: 0,
+                fields: vec![
+                    SppRecordValue::Opaque16(value4),
+                    SppRecordValue::Opaque16(value22),
+                ],
+            }),
+        };
+        let encoded = records.encode().unwrap();
+        assert_eq!(SppDocumentRecords::decode(&encoded).unwrap(), records);
+        assert_eq!(
+            encoded
+                .windows(16)
+                .filter(|window| window.iter().copied().eq(value4))
+                .count(),
+            1
+        );
+        assert_eq!(
+            encoded
+                .windows(16)
+                .filter(|window| window.iter().copied().eq(value22))
+                .count(),
+            1
         );
     }
 

@@ -2,17 +2,17 @@
 
 ## Fork update — 2026-10-20
 
-SubCraft is the sole target. The owner abandoned `.kalium` and `.kbrush`
-compatibility; their adapters are removed/rejected. Genuine editable SPP is the
-first format priority and **is not implemented yet**. Persistent Activity,
-headless workflows and seeded Roughness graph controls are integrated. An
-experimental Rust SPP record codec and checksum now pass six owned dataset
-checks; an externally renamed SPP fixture reopened editable in Painter. This
-is research acceptance, not SubCraft SPP open/save support. Latest
-scoped validation: 76 Rust tests and 6 Python research tests passed; workspace
-compile passes. UI runtime/visual and full SPP roundtrip acceptance remain open.
-See `integration/kalium-merge.md` and `research/spp-roundtrip.md`. Historical
-upstream sections below are not current fork acceptance.
+SubCraft is the sole target. `.kalium` and `.kbrush` adapters are abandoned.
+Native editable SPP is first; USPP follows it. The optional Rust container
+backend now passes a controlled three-property **Rust → Painter → Rust** round
+trip (name, visibility, Base Color opacity), preserving unrelated archive data.
+65 project unit tests and three private corpus tests pass. Full editor SPP
+open/save remains unfinished: mesh/resources, strokes/fills/masks, length-changing
+writes and parser isolation still need implementation and acceptance.
+See [runtime evidence](research/spp-roundtrip.md),
+[container checkpoint](research/spp-container-plan.md), and
+[USPP audit](research/uspp-format.md). Historical upstream sections below do not
+represent current fork acceptance.
 
 
 Last updated: 2026-10-18 (sessions 70–71: background compositing, sparse GPU uploads, 0.1.7)

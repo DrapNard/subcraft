@@ -210,7 +210,8 @@ mod launch_tests {
             fn bytes(&self) -> Result<Vec<u8>, String> { Err("routing must not read the file".into()) }
         }
         let input = egui::RawInput { dropped_files: vec![std::sync::Arc::new(TestDrop(path.clone()))], ..Default::default() };
-        let _ = ctx.run(input, |ctx| app.dropped_project(ctx, 0.0));
+        let mut output = ctx.run_ui(input, |ui| app.dropped_project(ui.ctx(), 0.0));
+        output.textures_delta.clear();
         assert_eq!(app.state.confirm, Some(Pending::OpenRecent));
         assert_eq!(app.state.welcome.pending_recent, Some(path));
         assert_eq!(app.state.session.document(), &before);
@@ -228,7 +229,8 @@ mod launch_tests {
         let ctx = egui::Context::default();
         let before = app.state.session.document().clone();
         let input = egui::RawInput { events: vec![egui::Event::Key { key: egui::Key::E, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }], ..Default::default() };
-        let _ = ctx.run(input, |ctx| app.shortcuts(ctx));
+        let mut output = ctx.run_ui(input, |ui| app.shortcuts(ui.ctx()));
+        output.textures_delta.clear();
         assert!(matches!(app.state.tool, Tool::Brush));
         assert_eq!(app.state.confirm, Some(Pending::OpenProject));
         assert_eq!(app.state.session.document(), &before);

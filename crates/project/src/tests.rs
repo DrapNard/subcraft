@@ -248,6 +248,32 @@ fn file_save_is_atomic_and_overwrites() {
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn atomic_save_preserves_existing_file_permissions() {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    let dir =
+        std::env::temp_dir().join(format!("subcraft-save-permissions-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("private.subcraft");
+    std::fs::write(&path, b"private project").unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+    save_project(
+        &path,
+        &primitives::cube(1.0),
+        &Document::default(),
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap();
+
+    assert_eq!(std::fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
 #[test]
 fn staging_files_are_unique_and_failed_replace_preserves_existing_target() {
     let dir = std::env::temp_dir().join(format!("subcraft-save-safety-{}", std::process::id()));
@@ -695,30 +721,83 @@ fn procedural_roughness_graph_preserves_stable_source_reference_after_save() {
     let mut set = TextureSet::new("Graph", 0, 64);
     let mut source = Layer::new_paint("Raw AO", &set);
     let source_id = source.id;
-    let LayerContent::Paint(paint) = &mut source.content else { panic!() };
-    paint.channels.insert(ChannelKind::AmbientOcclusion, TiledImage::new(64, 64, 2, [0.25, 1.0, 0.0, 0.0]));
+    let LayerContent::Paint(paint) = &mut source.content else {
+        panic!()
+    };
+    paint.channels.insert(
+        ChannelKind::AmbientOcclusion,
+        TiledImage::new(64, 64, 2, [0.25, 1.0, 0.0, 0.0]),
+    );
     let mut target = Layer::new_paint("Generated Roughness", &set);
     let graph = subcraft_doc::ProceduralGraph::value_noise_times_occlusion(42, 8.0, source_id);
-    let LayerContent::Paint(paint) = &mut target.content else { panic!() };
+    let LayerContent::Paint(paint) = &mut target.content else {
+        panic!()
+    };
     paint.procedural_graph = Some(graph.clone());
     set.insert_above(None, source);
     set.insert_above(None, target);
-    let doc = Document { texture_sets: vec![set] };
-    let saved = write_project(Cursor::new(Vec::new()), &primitives::cube(1.0), &doc,
-        &ResourceStore::default(), &MeshMapSet::new()).unwrap().into_inner();
+    let doc = Document {
+        texture_sets: vec![set],
+    };
+    let saved = write_project(
+        Cursor::new(Vec::new()),
+        &primitives::cube(1.0),
+        &doc,
+        &ResourceStore::default(),
+        &MeshMapSet::new(),
+    )
+    .unwrap()
+    .into_inner();
     let reopened = read_project(Cursor::new(saved)).unwrap();
     assert_eq!(reopened.document, doc);
-    let LayerContent::Paint(paint) = &reopened.document.texture_sets[0].layers[1].content else { panic!() };
-    assert_eq!(paint.procedural_graph.as_ref().unwrap().occlusion_source_layer_id(), Some(source_id));
+    let LayerContent::Paint(paint) = &reopened.document.texture_sets[0].layers[1].content else {
+        panic!()
+    };
+    assert_eq!(
+        paint
+            .procedural_graph
+            .as_ref()
+            .unwrap()
+            .occlusion_source_layer_id(),
+        Some(source_id)
+    );
     assert_eq!(paint.procedural_graph.as_ref().unwrap(), &graph);
 }
-
 
 #[test]
 fn abandoned_kalium_formats_reject_before_access_or_write() {
     for name in ["legacy.kalium", "legacy.KALIUM", "brush.kbrush"] {
         let path = std::path::Path::new(name);
-        assert!(super::reject_spp_load_path(path).unwrap_err().to_string().contains("not supported"));
-        assert!(super::reject_spp_save_path(path).unwrap_err().to_string().contains("not supported"));
+        assert!(
+            super::reject_spp_load_path(path)
+                .unwrap_err()
+                .to_string()
+                .contains("not supported")
+        );
+        assert!(
+            super::reject_spp_save_path(path)
+                .unwrap_err()
+                .to_string()
+                .contains("not supported")
+        );
+    }
+}
+
+#[test]
+fn uspp_is_never_read_or_written_as_a_native_subcraft_archive() {
+    for name in ["project.uspp", "project.USPP"] {
+        let path = std::path::Path::new(name);
+        assert!(
+            super::reject_spp_load_path(path)
+                .unwrap_err()
+                .to_string()
+                .contains(".uspp")
+        );
+        assert!(
+            super::reject_spp_save_path(path)
+                .unwrap_err()
+                .to_string()
+                .contains(".uspp")
+        );
     }
 }

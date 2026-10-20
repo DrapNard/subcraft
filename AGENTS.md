@@ -16,6 +16,8 @@ Read README.md, CLAUDE.md, docs/progress.md and docs/integration/kalium-merge.md
 - No image generation or generative AI product features.
 - Owner decision (2026-10-20): abandon `.kalium` and `.kbrush` compatibility.
   Transfer useful editor capabilities, but do not develop or expose Kalium format adapters.
+- Native editable SPP comes first; Universal SPP `.uspp` support follows it.
+  Reuse document semantics, preserve unknown archive data, and report migration losses.
 - Keep editable SPP open/save as the first format priority. Detection, renamed
   archives, flattening and a Painter-dependent bridge are not SPP support.
 - Treat imported data as untrusted. Validate dimensions, allocations, recursion,
