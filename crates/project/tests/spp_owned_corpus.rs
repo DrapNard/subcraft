@@ -419,3 +419,87 @@ fn owned_isolated_worker_reads_and_saves_combined_edits() {
     assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[cfg(all(feature = "spp-worker", target_os = "linux"))]
+#[test]
+#[ignore = "requires worker-enabled SubCraft and the owned full uniform-fill SPP fixture"]
+fn owned_retained_spp_survives_deleted_source_recovery_and_repeated_saves() {
+    use std::os::unix::fs::DirBuilderExt;
+    use subcraft_project::{
+        spp_container::SppTargetRevision, spp_fill, spp_retained::RetainedProject,
+    };
+    let root =
+        PathBuf::from(std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("private corpus"));
+    let executable =
+        PathBuf::from(std::env::var_os("SUBCRAFT_SPP_WORKER_EXE").expect("worker executable"));
+    let original = root.join("single-fill-original-full.spp");
+    let original_bytes = std::fs::read(&original).unwrap();
+    let directory = std::env::temp_dir().join(format!(
+        "subcraft-spp-retained-corpus-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .unwrap();
+    let source = directory.join("source.spp");
+    let recovery = directory.join("recovery.spp");
+    std::fs::copy(&original, &source).unwrap();
+    let first = RetainedProject::open(&executable, &source).unwrap();
+    let retained = first.clone();
+    drop(first);
+    std::fs::remove_file(&source).unwrap();
+    assert!(retained.save_original(&executable).is_err());
+    assert!(!source.exists());
+    let mut recovered = retained
+        .save_copy(&executable, &recovery, SppTargetRevision::Absent)
+        .unwrap();
+    // Every resource and unknown byte survives a genuine SPP recovery copy.
+    assert_eq!(std::fs::read(&recovery).unwrap(), original_bytes);
+    let uid =
+        spp_fill::enumerate_uniform_base_color_sources(&recovered.project.records).unwrap()[0].uid;
+    spp_fill::set_uniform_base_color_source(&mut recovered.project.records, uid, [0.2, 0.3, 0.4])
+        .unwrap();
+    recovered.project.scene.meshes[0].uvs[0][0] = 0.875;
+    let mut next = recovered.save_original(&executable).unwrap();
+    assert_ne!(next.source_digest(), recovered.source_digest());
+    assert_eq!(next.project.records, recovered.project.records);
+    assert_eq!(
+        next.project.scene.encode().unwrap(),
+        recovered.project.scene.encode().unwrap()
+    );
+    spp_fill::set_uniform_base_color_source(&mut next.project.records, uid, [0.3, 0.4, 0.5])
+        .unwrap();
+    let current = next.save_original(&executable).unwrap();
+    assert_ne!(next.source_digest(), current.source_digest());
+    let saved_bytes = std::fs::read(&recovery).unwrap();
+    assert!(recovered.save_original(&executable).is_err());
+    assert_eq!(std::fs::read(&recovery).unwrap(), saved_bytes);
+    let file = hdf5::File::open_rw(&recovery).unwrap();
+    file.new_attr::<u32>()
+        .create("subcraft-external-revision")
+        .unwrap()
+        .write_scalar(&7)
+        .unwrap();
+    file.close().unwrap();
+    let external_bytes = std::fs::read(&recovery).unwrap();
+    assert!(current.save_original(&executable).is_err());
+    assert_eq!(std::fs::read(&recovery).unwrap(), external_bytes);
+    // The immutable archive still supports Save As after the destination changes.
+    let copy = directory.join("saved-as.spp");
+    let restored = current
+        .save_copy(&executable, &copy, SppTargetRevision::Absent)
+        .unwrap();
+    assert_eq!(restored.project.records, current.project.records);
+    assert_eq!(
+        restored.project.scene.encode().unwrap(),
+        current.project.scene.encode().unwrap()
+    );
+    assert!(
+        current
+            .save_copy(&executable, &copy, SppTargetRevision::Absent)
+            .is_err()
+    );
+    assert_eq!(std::fs::read(&original).unwrap(), original_bytes);
+    std::fs::remove_dir_all(directory).unwrap();
+}

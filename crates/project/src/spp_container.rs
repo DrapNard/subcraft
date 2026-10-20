@@ -7,11 +7,11 @@
 //! in an isolated worker with memory/time limits before exposing arbitrary files.
 use crate::{
     spp_checksum::spp_dataset_checksum,
-    spp_document::{SppDocumentRecords, MAX_DATASET_BYTES},
+    spp_document::{MAX_DATASET_BYTES, SppDocumentRecords},
     spp_scene::SppScene,
 };
 use hdf5::types::{IntSize, TypeDescriptor};
-use hdf5::{plist::dataset_create::Layout, Dataset, Group, LinkType};
+use hdf5::{Dataset, Group, LinkType, plist::dataset_create::Layout};
 use sha2::{Digest, Sha256};
 use std::{
     fs::{File, OpenOptions},
@@ -44,7 +44,7 @@ pub enum SppContainerError {
     Unsupported(&'static str),
     #[error("SPP document checksum does not match")]
     Checksum,
-    #[error("SPP staged copy no longer matches the source document")]
+    #[error("SPP source or destination archive revision changed")]
     SourceChanged,
     #[error("SPP output was replaced, but its directory could not be synced: {0}")]
     CommittedButNotSynced(String),
@@ -99,6 +99,13 @@ fn read_project_snapshot(path: &Path, digest: [u8; 32]) -> Result<SppContainerPr
     })
 }
 
+/// Required destination revision for saves from a retained source archive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SppTargetRevision {
+    Absent,
+    Digest([u8; 32]),
+}
+
 /// Commit document and scene edits together, preserving opaque artist payloads.
 /// Both encodings must retain their original length. A stale source rejects before publication.
 pub fn save_project_copy(
@@ -106,6 +113,25 @@ pub fn save_project_copy(
     target: &Path,
     project: &SppContainerProject,
 ) -> Result<()> {
+    save_project_copy_inner(source, target, project, None).map(|_| ())
+}
+
+/// Save against an explicit destination revision, independently of the base archive.
+pub fn save_project_copy_guarded(
+    source: &Path,
+    target: &Path,
+    project: &SppContainerProject,
+    revision: SppTargetRevision,
+) -> Result<[u8; 32]> {
+    save_project_copy_inner(source, target, project, Some(revision))
+}
+
+fn save_project_copy_inner(
+    source: &Path,
+    target: &Path,
+    project: &SppContainerProject,
+    revision: Option<SppTargetRevision>,
+) -> Result<[u8; 32]> {
     if !target
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("spp"))
@@ -129,7 +155,8 @@ pub fn save_project_copy(
     }
     with_plugins_disabled(|| {
         let original = read_project_snapshot(&snapshot.path, snapshot.digest)?;
-        stage_copy_and_replace(source, target, &snapshot, |stage| {
+        let mut committed_digest = [0; 32];
+        stage_copy_and_replace_guarded(source, target, &snapshot, revision, |stage| {
             let document_changed = document != original.original_document_bytes;
             let scene_changed = scene != original.original_scene_bytes;
             if document_changed || scene_changed {
@@ -157,8 +184,10 @@ pub fn save_project_copy(
             {
                 return Err(SppContainerError::SourceChanged);
             }
+            committed_digest = hash_file(&mut File::open(stage)?)?;
             Ok(())
-        })
+        })?;
+        Ok(committed_digest)
     })
 }
 
@@ -473,6 +502,30 @@ fn stage_copy_and_replace(
     snapshot: &SourceSnapshot,
     edit: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<()> {
+    stage_copy_and_replace_guarded(source, target, snapshot, None, edit)
+}
+
+fn stage_copy_and_replace_guarded(
+    source: &Path,
+    target: &Path,
+    snapshot: &SourceSnapshot,
+    revision: Option<SppTargetRevision>,
+    edit: impl FnOnce(&Path) -> Result<()>,
+) -> Result<()> {
+    // Hold the target's cooperative lock through publication; recheck its path at commit.
+    let target_guard = match revision {
+        Some(SppTargetRevision::Digest(digest)) => {
+            let guard = checked_target(target, digest)?;
+            Some(guard)
+        }
+        Some(SppTargetRevision::Absent) => {
+            if target.try_exists()? || std::fs::symlink_metadata(target).is_ok() {
+                return Err(SppContainerError::SourceChanged);
+            }
+            None
+        }
+        None => None,
+    };
     let (stage, mut output) = crate::create_staging_file(target)
         .map_err(|e| SppContainerError::Staging(e.to_string()))?;
     let result = (|| {
@@ -499,14 +552,56 @@ fn stage_copy_and_replace(
 
         OpenOptions::new().write(true).open(&stage)?.sync_all()?;
         snapshot.verify_source(source)?;
-        std::fs::set_permissions(&stage, snapshot.permissions.clone())?;
-        publish_stage(&stage, target, crate::sync_parent_directory)?;
+        let permissions = target_guard
+            .as_ref()
+            .map(|f| f.metadata().map(|m| m.permissions()))
+            .transpose()?
+            .unwrap_or_else(|| snapshot.permissions.clone());
+        std::fs::set_permissions(&stage, permissions)?;
+        match revision {
+            Some(SppTargetRevision::Absent) => {
+                // Atomic no-clobber publication: another writer cannot be overwritten.
+                std::fs::hard_link(&stage, target)?;
+                std::fs::remove_file(&stage)
+                    .map_err(|e| SppContainerError::CommittedButNotSynced(e.to_string()))?;
+                crate::sync_parent_directory(target)
+                    .map_err(|e| SppContainerError::CommittedButNotSynced(e.to_string()))?;
+            }
+            Some(SppTargetRevision::Digest(digest)) => {
+                verify_target(target, digest)?;
+                publish_stage(&stage, target, crate::sync_parent_directory)?;
+            }
+            None => publish_stage(&stage, target, crate::sync_parent_directory)?,
+        }
         Ok(())
     })();
     if result.is_err() {
         let _ = std::fs::remove_file(&stage);
     }
     result
+}
+
+fn verify_target(path: &Path, digest: [u8; 32]) -> Result<()> {
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink() {
+        return Err(SppContainerError::SourceChanged);
+    }
+    let mut file = File::open(path)?;
+    if !file.metadata()?.is_file() || hash_file(&mut file)? != digest {
+        return Err(SppContainerError::SourceChanged);
+    }
+    Ok(())
+}
+fn checked_target(path: &Path, digest: [u8; 32]) -> Result<File> {
+    let mut file = File::open(path)?;
+    file.try_lock_shared()
+        .map_err(|_| SppContainerError::Unsupported("destination is in use"))?;
+    if std::fs::symlink_metadata(path)?.file_type().is_symlink()
+        || !file.metadata()?.is_file()
+        || hash_file(&mut file)? != digest
+    {
+        return Err(SppContainerError::SourceChanged);
+    }
+    Ok(file)
 }
 
 /// Invalidate only derived texture-cache payloads. Keep its groups/attributes and every
@@ -777,6 +872,101 @@ mod tests {
         assert_eq!(std::fs::read(&target).unwrap(), original);
     }
 
+    #[test]
+    fn guarded_project_save_returns_committed_digest_and_refuses_existing_new_target() {
+        let tmp = Temp::new();
+        let source = tmp.path("source.spp");
+        let target = tmp.path("target.spp");
+        fixture(&source, false);
+        let project = read_project(&source).unwrap();
+        let digest =
+            save_project_copy_guarded(&source, &target, &project, SppTargetRevision::Absent)
+                .unwrap();
+        assert_eq!(
+            digest,
+            hash_file(&mut File::open(&target).unwrap()).unwrap()
+        );
+        let before = std::fs::read(&target).unwrap();
+        assert!(
+            save_project_copy_guarded(&source, &target, &project, SppTargetRevision::Absent)
+                .is_err()
+        );
+        assert_eq!(std::fs::read(&target).unwrap(), before);
+    }
+
+    #[test]
+    fn destination_revision_checks_reject_changes_during_staging() {
+        let tmp = Temp::new();
+        let source = tmp.path("source.spp");
+        let target = tmp.path("target.spp");
+        fixture(&source, false);
+        std::fs::write(&target, b"initial destination").unwrap();
+        let digest = hash_file(&mut File::open(&target).unwrap()).unwrap();
+        let snapshot = SourceSnapshot::new(&source).unwrap();
+        assert!(
+            stage_copy_and_replace_guarded(
+                &source,
+                &target,
+                &snapshot,
+                Some(SppTargetRevision::Digest(digest)),
+                |_| {
+                    std::fs::write(&target, b"external destination change")?;
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"external destination change"
+        );
+        std::fs::remove_file(&target).unwrap();
+        assert!(
+            stage_copy_and_replace_guarded(
+                &source,
+                &target,
+                &snapshot,
+                Some(SppTargetRevision::Absent),
+                |_| {
+                    std::fs::write(&target, b"destination created during save")?;
+                    Ok(())
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            b"destination created during save"
+        );
+        assert_eq!(std::fs::read_dir(&tmp.0).unwrap().count(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn guarded_in_place_save_preserves_target_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = Temp::new();
+        let source = tmp.path("source.spp");
+        fixture(&source, false);
+        std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let mut project = read_project(&source).unwrap();
+        let old_digest = project.source_digest();
+        project.records.root.as_mut().unwrap().fields[0] = SppRecordValue::Utf8("Modified".into());
+        let digest = save_project_copy_guarded(
+            &source,
+            &source,
+            &project,
+            SppTargetRevision::Digest(old_digest),
+        )
+        .unwrap();
+        assert_ne!(digest, old_digest);
+        assert_eq!(
+            std::fs::metadata(&source).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        assert_eq!(read_project(&source).unwrap().records, project.records);
+    }
+
     fn records() -> SppDocumentRecords {
         SppDocumentRecords {
             header: SppDocumentHeader {
@@ -1026,9 +1216,11 @@ mod tests {
         }
         let mut document = read_document(&source).unwrap();
         save_document_copy(&source, &target, &document).unwrap();
-        assert!(hdf5::File::open(&target)
-            .unwrap()
-            .link_exists("texture-cache/material/derived"));
+        assert!(
+            hdf5::File::open(&target)
+                .unwrap()
+                .link_exists("texture-cache/material/derived")
+        );
         document.records.root.as_mut().unwrap().fields[0] =
             crate::spp_document::SppRecordValue::Utf8("SubCraft".into());
         save_document_copy(&source, &target, &document).unwrap();
@@ -1051,9 +1243,11 @@ mod tests {
                 .unwrap(),
             [7, 9, 11, 13]
         );
-        assert!(hdf5::File::open(&source)
-            .unwrap()
-            .link_exists("texture-cache/material/derived"));
+        assert!(
+            hdf5::File::open(&source)
+                .unwrap()
+                .link_exists("texture-cache/material/derived")
+        );
     }
     #[test]
     fn unsafe_cache_links_and_pins_fail_without_replacing_target() {

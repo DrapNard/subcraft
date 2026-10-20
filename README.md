@@ -53,7 +53,9 @@ edit also passes Painter PNG pixel checks after derived-cache invalidation.
 Bounded scene/node/material codecs preserve unknown metadata. An optional Linux
 worker (`--features spp-worker`) now isolates native read/save operations with
 resource limits; the actual desktop executable passes owned-SPP worker roundtrips.
-This feature does not yet enable SPP files in the editor. Full paint mapping and application open/save
+A retained full-archive API also supports genuine SPP recovery/Save-As copies
+after source deletion, repeated saves and destination-revision checks.
+These APIs do not yet enable SPP files or recovery in the editor. Full paint mapping and application open/save
 are still missing. See the [container checkpoint](docs/research/spp-container-plan.md).
 
 **Next format: Universal SPP (`.uspp`)**, after the native SPP workflow. Its ZIP

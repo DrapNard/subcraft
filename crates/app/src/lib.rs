@@ -48,3 +48,6 @@ pub use subcraft_paint::Camera;
 
 #[cfg(all(feature = "spp-worker", not(target_arch = "wasm32")))]
 pub use subcraft_project::spp_worker;
+
+#[cfg(all(feature = "spp-worker", target_os = "linux"))]
+pub use subcraft_project::spp_retained;

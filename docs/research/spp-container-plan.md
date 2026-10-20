@@ -81,8 +81,8 @@ Local acceptance uses the actual worker-enabled desktop executable and an owned
 full (not sparse) uniform-fill SPP: read both datasets and source digest, save a
 byte-exact no-op copy, change uniform Base Color plus UV together, reopen and
 compare both encoded datasets, preserve the source, and reject an external
-source-metadata change without changing the existing destination. All nine
-private corpus tests and 98 project unit tests pass with `spp-worker`. This is
+source-metadata change without changing the existing destination. All ten
+private corpus tests and 105 project unit tests pass with `spp-worker`. This is
 native-worker acceptance; no additional Painter-render or GUI acceptance is
 claimed for the worker in this checkpoint. A `/proc` runtime observation found
 one worker thread, four allowed CPUs and ~130 MiB startup virtual address space;
@@ -96,6 +96,57 @@ scripts/dev/low-impact env SUBCRAFT_SPP_RESEARCH_DIR=/absolute/private/corpus \
   cargo test --locked -p subcraft-project --features spp-worker \
   --lib --test spp_owned_corpus -- --include-ignored
 ```
+
+## Retained full archives and destination revisions
+
+The Linux `spp_retained::RetainedProject` API captures the complete source into a
+private 0700 directory with a 0600 file before native parsing. Its Rust copier
+caps archive bytes, checks the signature, hashes the copy, rehashes the same
+locked source descriptor and rejects a changing source. Nonblocking open plus
+regular-file checks reject FIFOs before the worker timeout is available. The
+source handle/lock is released after capture. Shared contexts retain the private
+archive until their last clone drops; no unknown resource is reconstructed from
+the editable records/mesh. Archive capture is synchronous IO and should run in
+an application background job when connected to Session.
+
+`save_copy` requires an explicit destination policy: absent, or an expected full
+SHA-256. The worker separately checks the immutable base archive and destination
+revision. It validates the destination before staging and rechecks at commit.
+Absent destinations publish with an atomic no-clobber hard link; a newly appearing
+file is never replaced. Existing destinations retain their permissions. Revision
+checks/cooperative locks cannot make replacement a filesystem-wide compare-and-swap
+against a noncooperating writer in the final check-to-rename interval.
+
+Guarded saves return the digest of the verified staged archive. The retained API
+captures/reopens the saved destination and checks that digest plus both editable
+datasets before returning a fresh context for repeated saves. After a successful
+publish acknowledgement, refresh failures are reported as committed/context-refresh
+failures. A crash before acknowledgement remains ambiguous as described above. An original-path conflict can still
+be saved to a new path using the retained base. Attempts to overwrite the private
+base itself (including hard-link aliases) reject.
+
+The actual desktop executable passes a private original 12.1.5 uniform-fill case:
+delete the source, reject in-place save to the missing original, create a genuine
+byte-exact SPP recovery file, change color and UV together, save twice using fresh
+contexts, reject stale contexts and external metadata changes, then Save As from
+the retained archive. The original owned fixture remains unchanged. This proves
+backend retention/recovery-copy behavior, not Session/autosave/UI recovery or
+Painter acceptance of a newly expanded feature set.
+
+Worker exec now marks all descriptors above stdio CLOEXEC using Linux
+`close_range` (kernel 5.11+), requiring `/proc` for startup resource checks. A raw
+Rust binding mutex surrounds spawn until exec completes, without initializing
+HDF5 in the host. This prevents native file close/reopen from racing transient
+fork inheritance. Regression tests cover an explicitly inheritable library-like
+descriptor, destination creation/change during staging, no-clobber publication,
+in-place permissions, private-archive lifetime and FIFO rejection. The initial
+parallel run exposed an HDF5 lock failure while a worker-test child was alive;
+closing inherited descriptors plus the spawn mutex fixes that reproduction.
+
+Remaining integration: map the verified SPP document into Session/history without
+flattening, retain this archive in snapshots, persist genuine SPP autosave copies
+plus origin/revision metadata, and restore those contexts safely. Broader strokes,
+channels, masks, resources, transforms and length-changing writes remain required.
 
 ## Preservation and safety contract
 

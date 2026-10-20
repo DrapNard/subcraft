@@ -72,7 +72,7 @@ impl Frame {
                 (24..=MAX_DOCUMENT).contains(&document_len)
                     && (512..=MAX_SCENE).contains(&scene_len)
             }
-            ACK => document_len == 0 && scene_len == 0 && digest == [0; 32],
+            ACK => document_len == 0 && scene_len == 0,
             FAILURE => {
                 (1..=MAX_ERROR).contains(&document_len) && scene_len == 0 && digest == [0; 32]
             }
@@ -156,6 +156,56 @@ pub fn save_project_copy(
     Ok(())
 }
 
+/// Save a retained base archive only if the destination has the expected revision.
+pub fn save_project_copy_guarded(
+    executable: &Path,
+    source: &Path,
+    target: &Path,
+    project: &WorkerProject,
+    revision: spp_container::SppTargetRevision,
+) -> Result<[u8; 32]> {
+    let guard = match revision {
+        spp_container::SppTargetRevision::Absent => "absent".to_owned(),
+        spp_container::SppTargetRevision::Digest(digest) => {
+            digest.iter().map(|byte| format!("{byte:02x}")).collect()
+        }
+    };
+    let request = Frame {
+        kind: SAVE,
+        digest: project.source_digest,
+        document: project.records.encode().map_err(|e| e.to_string())?,
+        scene: project.scene.encode().map_err(|e| e.to_string())?,
+    };
+    let response = run(
+        executable,
+        &[
+            source.as_os_str().to_owned(),
+            target.as_os_str().to_owned(),
+            guard.into(),
+        ],
+        request,
+        TIMEOUT,
+    )?;
+    if response.kind != ACK {
+        return Err("unexpected guarded SPP save response".into());
+    }
+    Ok(response.digest)
+}
+fn parse_revision(value: &std::ffi::OsStr) -> Result<spp_container::SppTargetRevision> {
+    let text = value.to_str().ok_or("invalid SPP destination revision")?;
+    if text == "absent" {
+        return Ok(spp_container::SppTargetRevision::Absent);
+    }
+    if text.len() != 64 || !text.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("invalid SPP destination digest".into());
+    }
+    let mut digest = [0; 32];
+    for (i, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).map_err(|e| e.to_string())?;
+    }
+    Ok(spp_container::SppTargetRevision::Digest(digest))
+}
+
 // The parent owns snapshot cleanup even if the parser crashes or is killed.
 struct Scratch(std::path::PathBuf);
 impl Scratch {
@@ -182,7 +232,8 @@ impl Drop for Scratch {
 
 fn run(executable: &Path, paths: &[OsString], request: Frame, timeout: Duration) -> Result<Frame> {
     let scratch = Scratch::new()?;
-    let mut child = Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("--spp-worker")
         .args(paths)
         .stdin(Stdio::piped())
@@ -197,9 +248,17 @@ fn run(executable: &Path, paths: &[OsString], request: Frame, timeout: Duration)
         .env("TMP", &scratch.0)
         .env("TEMP", &scratch.0)
         .env("RAYON_NUM_THREADS", "4")
-        .env("OMP_NUM_THREADS", "4")
-        .spawn()
-        .map_err(|e| format!("start SPP worker: {e}"))?;
+        .env("OMP_NUM_THREADS", "4");
+    #[cfg(target_os = "linux")]
+    close_inherited_fds(&mut command);
+    let mut child = {
+        // This is the binding's Rust mutex, without entering/initializing HDF5.
+        // Keep HDF5 file close/reopen calls from racing fork-to-exec: a C library
+        // descriptor inherited briefly by the child can otherwise retain a file lock.
+        let _spawn_guard = hdf5_sys::LOCK.lock();
+        command.spawn()
+    }
+    .map_err(|e| format!("start SPP worker: {e}"))?;
     let stdin = child.stdin.take().unwrap();
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
@@ -267,6 +326,29 @@ fn run(executable: &Path, paths: &[OsString], request: Frame, timeout: Duration)
     result
 }
 
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn close_inherited_fds(command: &mut Command) {
+    use std::os::unix::process::CommandExt;
+    // SAFETY: pre_exec calls only the async-signal-safe close_range syscall; it
+    // does not allocate or acquire a lock. CLOEXEC preserves Rust's exec-error pipe
+    // until exec while closing every non-stdio descriptor in the executed worker.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::syscall(
+                libc::SYS_close_range,
+                3_u32,
+                u32::MAX,
+                libc::CLOSE_RANGE_CLOEXEC,
+            ) != 0
+            {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 /// Hidden native entry point. Must execute before application logging/GUI setup.
 pub fn worker_main(paths: &[OsString]) -> Result<()> {
     apply_limits()?;
@@ -283,7 +365,11 @@ pub fn worker_main(paths: &[OsString]) -> Result<()> {
                     scene: project.scene.encode().map_err(|e| e.to_string())?,
                 })
             }
-            (SAVE, [source, target]) => {
+            (SAVE, [source, target]) | (SAVE, [source, target, _]) => {
+                let revision = paths
+                    .get(2)
+                    .map(|value| parse_revision(value))
+                    .transpose()?;
                 let records =
                     SppDocumentRecords::decode(&request.document).map_err(|e| e.to_string())?;
                 let scene = SppScene::decode(&request.scene).map_err(|e| e.to_string())?;
@@ -294,9 +380,24 @@ pub fn worker_main(paths: &[OsString]) -> Result<()> {
                 }
                 project.records = records;
                 project.scene = scene;
-                spp_container::save_project_copy(Path::new(source), Path::new(target), &project)
-                    .map_err(|e| e.to_string())?;
-                Ok(Frame::empty(ACK))
+                let digest = match revision {
+                    Some(revision) => spp_container::save_project_copy_guarded(
+                        Path::new(source),
+                        Path::new(target),
+                        &project,
+                        revision,
+                    ),
+                    None => spp_container::save_project_copy(
+                        Path::new(source),
+                        Path::new(target),
+                        &project,
+                    )
+                    .map(|_| [0; 32]),
+                }
+                .map_err(|e| e.to_string())?;
+                let mut response = Frame::empty(ACK);
+                response.digest = digest;
+                Ok(response)
             }
             _ => Err("invalid SPP worker request".into()),
         }
@@ -416,6 +517,46 @@ mod tests {
         huge[9..13].copy_from_slice(&u32::MAX.to_le_bytes());
         assert!(Frame::read(huge.as_slice()).is_err());
     }
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn host_does_not_inherit_library_file_descriptors() {
+        use std::os::{
+            fd::{AsRawFd, FromRawFd, OwnedFd},
+            unix::fs::PermissionsExt,
+        };
+        let root =
+            std::env::temp_dir().join(format!("subcraft-worker-fd-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&root).unwrap();
+        let data = std::fs::File::create(root.join("data")).unwrap();
+        // SAFETY: duplicate a live descriptor without CLOEXEC to model a C-library fd.
+        let inherited = unsafe { libc::fcntl(data.as_raw_fd(), libc::F_DUPFD, 128) };
+        assert!(inherited >= 128);
+        // SAFETY: fcntl returned a new owned descriptor.
+        let fd = unsafe { OwnedFd::from_raw_fd(inherited) };
+        let ack = root.join("ack");
+        Frame::empty(ACK)
+            .write(std::fs::File::create(&ack).unwrap())
+            .unwrap();
+        let script = root.join("worker");
+        std::fs::write(&script, "#!/bin/sh\ncat >/dev/null\nif [ -e \"/proc/self/fd/$2\" ]; then exit 42; fi\nexec cat \"$3\"\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(
+            run(
+                &script,
+                &[fd.as_raw_fd().to_string().into(), ack.into_os_string()],
+                Frame::empty(READ),
+                Duration::from_secs(3)
+            )
+            .unwrap()
+            .kind,
+            ACK
+        );
+        drop(fd);
+        drop(data);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn host_reaps_timeout_and_rejects_malformed_output() {

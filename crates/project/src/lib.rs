@@ -22,6 +22,8 @@ pub mod spp_checksum;
 pub mod spp_container;
 #[cfg(all(feature = "spp-worker", not(target_arch = "wasm32")))]
 pub mod spp_worker;
+#[cfg(all(feature = "spp-worker", target_os = "linux"))]
+pub mod spp_retained;
 pub mod spp_document;
 pub mod spp_semantics;
 pub mod spp_fill;

@@ -19,7 +19,13 @@ combined color/UV save, no-op byte preservation and external-change rejection.
 The first runtime test caught an allocator reservation conflict; configuring
 smaller mimalloc arenas at exec fixes it without raising the memory cap.
 The normal Session open/save path is still not connected to this worker.
-98 project unit tests and nine private corpus tests pass with `spp-worker`
+A shared, private full-archive context now preserves unknown resources after
+source deletion. The actual executable passes byte-exact SPP recovery-copy,
+combined edits, repeated-save rebasing and destination-conflict tests. Guarded
+saves return the staged archive digest; context refresh checks it before adoption.
+Child descriptors are closed at exec to prevent inherited native file locks.
+This provides backend recovery copies, not integrated Session/autosave recovery.
+105 project unit tests and ten private corpus tests pass with `spp-worker`
 (which includes `spp-hdf5`). The previously verified Python research suite has
 23 passing tests. The default project suite passes 81 tests without
 HDF5, and workspace compilation passes. Full SPP editor support remains unfinished:
