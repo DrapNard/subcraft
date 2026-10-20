@@ -3,12 +3,17 @@
 ## Fork update — 2026-10-20
 
 SubCraft is the sole target. `.kalium` and `.kbrush` adapters are abandoned.
-Native editable SPP is first; USPP follows it. The optional Rust container
-backend now passes a controlled three-property **Rust → Painter → Rust** round
-trip (name, visibility, Base Color opacity), preserving unrelated archive data.
-65 project unit tests and three private corpus tests pass. Full editor SPP
-open/save remains unfinished: mesh/resources, strokes/fills/masks, length-changing
-writes and parser isolation still need implementation and acceptance.
+Native editable SPP is first; USPP follows it. The optional Rust backend now
+reads/writes the understood scene geometry, hierarchy/material records and uniform
+Base Color source data. Controlled geometry UV and fill-color edits pass Painter
+reopen/reverse checks. The fill regression also verifies exported PNG pixels;
+derived texture-cache invalidation was required to avoid stale rendered colors.
+94 project unit tests and eight private corpus tests pass with `spp-hdf5`;
+23 Python research tests pass. The default project suite passes 81 tests without
+HDF5, and workspace compilation passes. Full SPP editor support remains unfinished:
+Session/document/resource integration, nonblank strokes, masks/effects, broader
+channels/materials, non-identity transforms, length-changing writes, isolated
+native parsing and complete artist workflows remain required.
 See [runtime evidence](research/spp-roundtrip.md),
 [container checkpoint](research/spp-container-plan.md), and
 [USPP audit](research/uspp-format.md). Historical upstream sections below do not

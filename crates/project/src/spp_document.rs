@@ -3,8 +3,8 @@
 //!
 //! This module does not parse HDF5, images, meshes, resources, project layers, or Painter's full
 //! project format. It accepts only the explicitly implemented primitive type codes below and
-//! rejects every unresolved value. In particular, type 11 is accepted only when its length is
-//! zero. Float values are stored as raw IEEE-754 bits so re-encoding does not normalize NaNs,
+//! rejects every unresolved value. Fixed-width primitives without established semantics are
+//! preserved as opaque bytes. Float values are stored as raw IEEE-754 bits so re-encoding does not normalize NaNs,
 //! signed zero, or other bit patterns.
 
 const MAGIC: [u8; 4] = [0xdd, 0x2f, 0x7c, 0x1b];
@@ -56,8 +56,6 @@ pub enum SppDocumentError {
     TrailingBytes,
     #[error("unsupported reflective property type {0}")]
     UnknownType(u32),
-    #[error("unresolved type 11 must have zero length, found {0}")]
-    NonEmptyType11(u32),
     #[error("boolean byte must be 0 or 255, found {0}")]
     InvalidBoolean(u8),
     #[error("record does not match its class definition")]
@@ -95,8 +93,14 @@ pub struct SppClassDefinition {
 pub enum SppRecordValue {
     /// Exact little-endian IEEE-754 payload bits, without float conversion.
     F32Bits(u32),
+    /// Fixed 8-byte primitive payload, preserved without assigning semantics.
+    Opaque8([u8; 8]),
+    /// Fixed 12-byte primitive payload, preserved without assigning semantics.
+    Opaque12([u8; 12]),
     /// Fixed 16-byte primitive payload, preserved without assigning component semantics.
     Opaque16([u8; 16]),
+    /// Fixed 64-byte primitive payload, preserved without assigning semantics.
+    Opaque64([u8; 64]),
     U32Pair([u32; 2]),
     U32(u32),
     Bool(bool),
@@ -108,8 +112,6 @@ pub enum SppRecordValue {
     InlineObjects(Vec<SppObject>),
     /// Nullable pointer object sequence (type 19).
     PointerObjects(Vec<Option<SppObject>>),
-    /// Empty value of unresolved type 11. Nonempty instances are rejected.
-    EmptyType11,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -270,7 +272,7 @@ fn validate_text(value: &str, cap: usize) -> Result<(), SppDocumentError> {
 
 fn check_supported_type(type_code: u32) -> Result<(), SppDocumentError> {
     match type_code {
-        1 | 4 | 6 | 9 | 10 | 11 | 12 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 => Ok(()),
+        1 | 2 | 3 | 4 | 6 | 9 | 10 | 11 | 12 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 => Ok(()),
         other => Err(SppDocumentError::UnknownType(other)),
     }
 }
@@ -322,6 +324,13 @@ impl Reader<'_> {
         Ok(count)
     }
 
+    fn ensure_object_budget(&self, additional: usize) -> Result<(), SppDocumentError> {
+        if additional > MAX_OBJECTS.saturating_sub(self.object_count) {
+            return Err(SppDocumentError::ObjectCountLimit);
+        }
+        Ok(())
+    }
+
     fn text(&mut self, cap: usize) -> Result<String, SppDocumentError> {
         let count = self.count(cap)?;
         let bytes = self.take(count)?;
@@ -356,6 +365,40 @@ impl Reader<'_> {
         Ok(index)
     }
 
+    fn read_class_reference(&mut self) -> Result<usize, SppDocumentError> {
+        let class_id = self.u32()?;
+        if class_id == CLASS_DEFINITION {
+            self.read_class_definition()
+        } else {
+            let index = class_id as usize;
+            if index >= self.classes.len() {
+                return Err(SppDocumentError::UnknownClass(class_id));
+            }
+            Ok(index)
+        }
+    }
+
+    fn read_fields(
+        &mut self,
+        class_index: usize,
+        depth: usize,
+    ) -> Result<SppObject, SppDocumentError> {
+        let definitions = self
+            .classes
+            .get(class_index)
+            .ok_or(SppDocumentError::UnknownClass(class_index as u32))?
+            .properties
+            .clone();
+        let mut fields = Vec::with_capacity(definitions.len());
+        for property in &definitions {
+            fields.push(self.read_value(property.type_code, depth + 1)?);
+        }
+        Ok(SppObject {
+            class_index,
+            fields,
+        })
+    }
+
     fn read_object(
         &mut self,
         pointer: bool,
@@ -385,25 +428,8 @@ impl Reader<'_> {
         } else {
             None
         };
-        let class_id = self.u32()?;
-        let class_index = if class_id == CLASS_DEFINITION {
-            self.read_class_definition()?
-        } else {
-            let index = class_id as usize;
-            if index >= self.classes.len() {
-                return Err(SppDocumentError::UnknownClass(class_id));
-            }
-            index
-        };
-        let class = self
-            .classes
-            .get(class_index)
-            .ok_or(SppDocumentError::UnknownClass(class_id))?;
-        let definitions = class.properties.clone();
-        let mut fields = Vec::with_capacity(definitions.len());
-        for property in &definitions {
-            fields.push(self.read_value(property.type_code, depth + 1)?);
-        }
+        let class_index = self.read_class_reference()?;
+        let object = self.read_fields(class_index, depth)?;
         if let Some(end) = expected_end {
             if self.cursor != end {
                 return Err(SppDocumentError::ObjectEndMismatch);
@@ -412,10 +438,7 @@ impl Reader<'_> {
         if self.cursor <= start {
             return Err(SppDocumentError::Truncated);
         }
-        Ok(Some(SppObject {
-            class_index,
-            fields,
-        }))
+        Ok(Some(object))
     }
 
     fn read_value(
@@ -425,10 +448,25 @@ impl Reader<'_> {
     ) -> Result<SppRecordValue, SppDocumentError> {
         Ok(match type_code {
             1 => SppRecordValue::F32Bits(self.u32()?),
+            2 => SppRecordValue::Opaque8(
+                self.take(8)?
+                    .try_into()
+                    .map_err(|_| SppDocumentError::Truncated)?,
+            ),
+            3 => SppRecordValue::Opaque12(
+                self.take(12)?
+                    .try_into()
+                    .map_err(|_| SppDocumentError::Truncated)?,
+            ),
             4 | 22 => {
                 let bytes = self.take(16)?;
                 SppRecordValue::Opaque16(bytes.try_into().map_err(|_| SppDocumentError::Truncated)?)
             }
+            14 => SppRecordValue::Opaque64(
+                self.take(64)?
+                    .try_into()
+                    .map_err(|_| SppDocumentError::Truncated)?,
+            ),
             6 => SppRecordValue::U32Pair([self.u32()?, self.u32()?]),
             9 => SppRecordValue::U32(self.u32()?),
             10 => match self.u8()? {
@@ -440,31 +478,28 @@ impl Reader<'_> {
             16 => SppRecordValue::Utf8(self.text(MAX_TEXT_BYTES)?),
             17 => {
                 let count = self.count(MAX_COUNT)?;
+                self.ensure_object_budget(count)?;
                 let mut objects = Vec::with_capacity(count);
-                for _ in 0..count {
-                    objects.push(
-                        self.read_object(false, depth)?
-                            .ok_or(SppDocumentError::InvalidRecord)?,
-                    );
+                if count > 0 {
+                    let class_index = self.read_class_reference()?;
+                    for _ in 0..count {
+                        self.object_count += 1;
+                        objects.push(self.read_fields(class_index, depth)?);
+                    }
                 }
                 SppRecordValue::InlineObjects(objects)
             }
             18 | 20 => SppRecordValue::Object(self.read_object(true, depth)?.map(Box::new)),
             19 => {
                 let count = self.count(MAX_COUNT)?;
+                self.ensure_object_budget(count)?;
                 let mut objects = Vec::with_capacity(count);
                 for _ in 0..count {
                     objects.push(self.read_object(true, depth)?);
                 }
                 SppRecordValue::PointerObjects(objects)
             }
-            11 => {
-                let count = self.u32()?;
-                if count != 0 {
-                    return Err(SppDocumentError::NonEmptyType11(count));
-                }
-                SppRecordValue::EmptyType11
-            }
+            11 => SppRecordValue::U32(self.u32()?),
             other => return Err(SppDocumentError::UnknownType(other)),
         })
     }
@@ -562,14 +597,29 @@ impl Writer<'_> {
             return Err(SppDocumentError::InvalidRecord);
         }
         self.write_class_reference(object.class_index)?;
-        // The small, capped schema is owned here so nested writes can mutably borrow the writer.
-        for (property, value) in properties.iter().zip(&object.fields) {
-            self.write_value(property.type_code, value, depth + 1)?;
-        }
+        self.write_object_fields(object, &properties, depth)?;
         if let Some(offset) = end_pointer {
             let end =
                 u32::try_from(self.bytes.len()).map_err(|_| SppDocumentError::DatasetTooLarge)?;
             self.patch_u32(offset, end)?;
+        }
+        Ok(())
+    }
+
+    fn write_object_fields(
+        &mut self,
+        object: &SppObject,
+        properties: &[SppPropertyDefinition],
+        depth: usize,
+    ) -> Result<(), SppDocumentError> {
+        if depth > MAX_OBJECT_DEPTH {
+            return Err(SppDocumentError::ObjectDepthLimit);
+        }
+        if object.fields.len() != properties.len() {
+            return Err(SppDocumentError::InvalidRecord);
+        }
+        for (property, value) in properties.iter().zip(&object.fields) {
+            self.write_value(property.type_code, value, depth + 1)?;
         }
         Ok(())
     }
@@ -607,7 +657,10 @@ impl Writer<'_> {
     ) -> Result<(), SppDocumentError> {
         match (type_code, value) {
             (1, SppRecordValue::F32Bits(bits)) => self.put_u32(*bits),
+            (2, SppRecordValue::Opaque8(bytes)) => self.put(bytes),
+            (3, SppRecordValue::Opaque12(bytes)) => self.put(bytes),
             (4 | 22, SppRecordValue::Opaque16(bytes)) => self.put(bytes),
+            (14, SppRecordValue::Opaque64(bytes)) => self.put(bytes),
             (6, SppRecordValue::U32Pair(values)) => {
                 self.put_u32(values[0])?;
                 self.put_u32(values[1])
@@ -620,9 +673,28 @@ impl Writer<'_> {
                 if objects.len() > MAX_COUNT {
                     return Err(SppDocumentError::CountLimit);
                 }
+                if objects.len() > MAX_OBJECTS.saturating_sub(self.object_count) {
+                    return Err(SppDocumentError::ObjectCountLimit);
+                }
                 self.put_u32(objects.len() as u32)?;
-                for object in objects {
-                    self.write_object(Some(object), false, depth)?;
+                if let Some(first) = objects.first() {
+                    if objects
+                        .iter()
+                        .any(|object| object.class_index != first.class_index)
+                    {
+                        return Err(SppDocumentError::InvalidRecord);
+                    }
+                    let properties = self
+                        .classes
+                        .get(first.class_index)
+                        .ok_or(SppDocumentError::InvalidRecord)?
+                        .properties
+                        .clone();
+                    self.write_class_reference(first.class_index)?;
+                    for object in objects {
+                        self.object_count += 1;
+                        self.write_object_fields(object, &properties, depth)?;
+                    }
                 }
                 Ok(())
             }
@@ -639,8 +711,7 @@ impl Writer<'_> {
                 }
                 Ok(())
             }
-            (11, SppRecordValue::EmptyType11) => self.put_u32(0),
-            (11, _) => Err(SppDocumentError::NonEmptyType11(1)),
+            (11, SppRecordValue::U32(value)) => self.put_u32(*value),
             (type_code, _) => Err(SppDocumentError::UnknownType(type_code)),
         }
     }
@@ -839,7 +910,7 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_types_nonempty_type_11_and_invalid_bool_encodings() {
+    fn rejects_unknown_types_and_invalid_bool_encodings_and_accepts_type_11_u32() {
         let mut unknown = fixture();
         unknown.classes[0].properties[0].type_code = 23;
         assert_eq!(unknown.encode(), Err(SppDocumentError::UnknownType(23)));
@@ -852,23 +923,11 @@ mod tests {
             Err(SppDocumentError::UnknownType(23))
         );
 
-        let mut nonempty = fixture();
-        nonempty.classes[0].properties[0] = SppPropertyDefinition {
-            name: "opaque".into(),
-            type_code: 11,
-        };
-        nonempty.root.as_mut().unwrap().fields[0] = SppRecordValue::Utf8("bad".into());
-        assert!(matches!(
-            nonempty.encode(),
-            Err(SppDocumentError::NonEmptyType11(_))
-        ));
-
-        let mut nonempty_input = raw_fixture();
-        nonempty_input[52..56].copy_from_slice(&11u32.to_le_bytes());
-        assert_eq!(
-            SppDocumentRecords::decode(&nonempty_input),
-            Err(SppDocumentError::NonEmptyType11(8))
-        );
+        let mut type_11 = fixture();
+        type_11.classes[0].properties[0].type_code = 11;
+        type_11.root.as_mut().unwrap().fields[0] = SppRecordValue::U32(0xFEED_1234);
+        let type_11_bytes = type_11.encode().unwrap();
+        assert_eq!(SppDocumentRecords::decode(&type_11_bytes).unwrap(), type_11);
 
         let mut bad_bool = raw_fixture();
         let bool_offset = bad_bool
@@ -943,6 +1002,164 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn opaque_fixed_width_types_two_three_and_fourteen_roundtrip_exactly() {
+        let bytes2 = [0x12; 8];
+        let bytes3 = [0x34; 12];
+        let bytes14 = [0x56; 64];
+        let records = SppDocumentRecords {
+            header: fixture().header,
+            classes: vec![SppClassDefinition {
+                name: "DataOpaqueWidths".into(),
+                properties: vec![
+                    SppPropertyDefinition {
+                        name: "two".into(),
+                        type_code: 2,
+                    },
+                    SppPropertyDefinition {
+                        name: "three".into(),
+                        type_code: 3,
+                    },
+                    SppPropertyDefinition {
+                        name: "fourteen".into(),
+                        type_code: 14,
+                    },
+                ],
+            }],
+            root: Some(SppObject {
+                class_index: 0,
+                fields: vec![
+                    SppRecordValue::Opaque8(bytes2),
+                    SppRecordValue::Opaque12(bytes3),
+                    SppRecordValue::Opaque64(bytes14),
+                ],
+            }),
+        };
+        let encoded = records.encode().unwrap();
+        assert_eq!(SppDocumentRecords::decode(&encoded).unwrap(), records);
+    }
+
+    #[test]
+    fn type_17_shares_one_class_reference_across_inline_elements() {
+        let records = SppDocumentRecords {
+            header: fixture().header,
+            classes: vec![
+                SppClassDefinition {
+                    name: "DataArrayRoot".into(),
+                    properties: vec![SppPropertyDefinition {
+                        name: "items".into(),
+                        type_code: 17,
+                    }],
+                },
+                SppClassDefinition {
+                    name: "DataArrayItem".into(),
+                    properties: vec![
+                        SppPropertyDefinition {
+                            name: "uid".into(),
+                            type_code: 11,
+                        },
+                        SppPropertyDefinition {
+                            name: "payload".into(),
+                            type_code: 18,
+                        },
+                    ],
+                },
+                SppClassDefinition {
+                    name: "DataArrayPayload".into(),
+                    properties: vec![
+                        SppPropertyDefinition {
+                            name: "short".into(),
+                            type_code: 2,
+                        },
+                        SppPropertyDefinition {
+                            name: "medium".into(),
+                            type_code: 3,
+                        },
+                        SppPropertyDefinition {
+                            name: "wide".into(),
+                            type_code: 14,
+                        },
+                    ],
+                },
+            ],
+            root: Some(SppObject {
+                class_index: 0,
+                fields: vec![SppRecordValue::InlineObjects(vec![
+                    SppObject {
+                        class_index: 1,
+                        fields: vec![
+                            SppRecordValue::U32(7),
+                            SppRecordValue::Object(Some(Box::new(SppObject {
+                                class_index: 2,
+                                fields: vec![
+                                    SppRecordValue::Opaque8([0x0a; 8]),
+                                    SppRecordValue::Opaque12([0x0b; 12]),
+                                    SppRecordValue::Opaque64([0x0c; 64]),
+                                ],
+                            }))),
+                        ],
+                    },
+                    SppObject {
+                        class_index: 1,
+                        fields: vec![
+                            SppRecordValue::U32(0xf000_0001),
+                            SppRecordValue::Object(Some(Box::new(SppObject {
+                                class_index: 2,
+                                fields: vec![
+                                    SppRecordValue::Opaque8([0x14; 8]),
+                                    SppRecordValue::Opaque12([0x15; 12]),
+                                    SppRecordValue::Opaque64([0x16; 64]),
+                                ],
+                            }))),
+                        ],
+                    },
+                ])],
+            }),
+        };
+        let encoded = records.encode().unwrap();
+        let decoded = SppDocumentRecords::decode(&encoded).unwrap();
+        assert_eq!(decoded, records);
+        assert_eq!(decoded.encode().unwrap(), encoded);
+    }
+
+    #[test]
+    fn type_17_rejects_heterogeneous_array_classes_before_encoding() {
+        let records = SppDocumentRecords {
+            header: fixture().header,
+            classes: vec![
+                SppClassDefinition {
+                    name: "DataArrayRoot".into(),
+                    properties: vec![SppPropertyDefinition {
+                        name: "items".into(),
+                        type_code: 17,
+                    }],
+                },
+                SppClassDefinition {
+                    name: "DataA".into(),
+                    properties: vec![],
+                },
+                SppClassDefinition {
+                    name: "DataB".into(),
+                    properties: vec![],
+                },
+            ],
+            root: Some(SppObject {
+                class_index: 0,
+                fields: vec![SppRecordValue::InlineObjects(vec![
+                    SppObject {
+                        class_index: 1,
+                        fields: vec![],
+                    },
+                    SppObject {
+                        class_index: 2,
+                        fields: vec![],
+                    },
+                ])],
+            }),
+        };
+        assert_eq!(records.encode(), Err(SppDocumentError::InvalidRecord));
     }
 
     #[test]

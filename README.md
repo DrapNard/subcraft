@@ -46,9 +46,12 @@ A Painter-dependent bridge or flattened texture extraction does not meet the
 standalone editable SPP goal.
 
 Research progress: the optional native Rust backend reads verified records and
-writes same-size layer property edits in copied SPP containers. Controlled edits
-reopen in Painter. Full document/mesh/paint mapping and application open/save are
-still missing. See the [container checkpoint](docs/research/spp-container-plan.md).
+writes same-size layer property and understood scene edits in copied SPP containers.
+Controlled property and UV edits reopen in Painter; Painter mesh export confirms
+the changed UV, and Rust reads the saved return. A uniform Base Color source
+edit also passes Painter PNG pixel checks after derived-cache invalidation.
+Bounded scene/node/material codecs preserve unknown metadata. Full paint mapping and application open/save
+are still missing. See the [container checkpoint](docs/research/spp-container-plan.md).
 
 **Next format: Universal SPP (`.uspp`)**, after the native SPP workflow. Its ZIP
 schema and preservation limits are [audited](docs/research/uspp-format.md); USPP

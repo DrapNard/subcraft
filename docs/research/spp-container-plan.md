@@ -1,9 +1,9 @@
 # Next SPP container integration
 
 Status: experimental backend checkpoint, 2026-10-20. The optional native
-`spp-hdf5` backend now reads and writes the understood document dataset in
+`spp-hdf5` backend now reads and writes the understood document and scene datasets in
 staged copies. Complete SPP project open/edit/save in SubCraft is unfinished.
-Length-changing writes reject; existing datasets/attributes stay in place.
+Length-changing writes reject; artist resources and unknown metadata are retained; derived render caches are invalidated on edits.
 
 ## Established prerequisites
 
@@ -87,3 +87,28 @@ locks cannot prevent every hostile external writer race.
 Browser CI builds remain enabled. Pages deployment now requires the repository
 variable `ENABLE_GITHUB_PAGES=true`, because this fork has no configured Pages
 site; this does not change browser application behavior.
+
+
+### Scene checkpoint
+
+`read_scene_bytes` verifies the bounded contiguous U8 scene dataset and checksum.
+`read_scene` and `save_scene_copy` decode/write the understood 1.7 triangle subset
+with the same snapshot identity and atomic staging protections as document edits.
+Stages are private before copying any payload; output permissions are applied at
+commit. Hierarchy references and material indices are checked against their
+respective tables. Unknown node metadata, material properties and scene tail
+remain lossless. Size-changing scene writes still reject. This is geometry I/O,
+not a paint-layer importer or editor Session. See the [adapter contract](spp-mesh-contract.md)
+and [Painter UV export/reverse evidence](spp-roundtrip.md).
+
+
+### Derived-cache invalidation is required for rendered edits
+
+An independently rendered fill regression showed that rewriting a document and
+its checksum alone leaves Painter exporting stale pixels. Changed document/scene
+saves now remove derived dataset links only under the validated `/texture-cache`
+hierarchy. Groups and attributes are retained. No-op saves retain cache payloads.
+Explicit persistent cache pins and unsupported cache graphs reject atomically;
+artist data outside the cache remains untouched. The controlled fill's exported
+PNG changes from RGB `[32,96,159]` to `[64,96,159]`, matching the edited source.
+General pinned and painted-layer preservation still needs owned acceptance.

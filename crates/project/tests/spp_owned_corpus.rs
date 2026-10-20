@@ -89,3 +89,268 @@ fn painter_return_property_edits_are_read_by_rust() {
     assert!(layers[0].enabled);
     assert_eq!(layers[0].base_color_opacity, 0.25);
 }
+
+#[test]
+#[ignore = "requires the five owned checksum-verified scene extracts and original OBJ sources"]
+fn owned_scene_geometry_deltas_and_exact_reencoding() {
+    use subcraft_project::spp_scene::SppScene;
+    let root = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("set private corpus directory"),
+    )
+    .join("mesh-12.1.5");
+    let load = |name: &str| {
+        let bytes = std::fs::read(root.join(format!("{name}.prefix.scene.bin"))).unwrap();
+        let scene = SppScene::decode(&bytes).unwrap();
+        assert_eq!(scene.encode().unwrap(), bytes, "{name} byte identity");
+        assert_eq!(scene.meshes.len(), 1);
+        let canonical = subcraft_project::spp_scene_mesh::build_reference_mesh(&scene).unwrap();
+        assert!(canonical.mesh.validate().is_empty());
+        assert_eq!(
+            canonical.mesh.triangle_count(),
+            scene.meshes[0].triangles.len()
+        );
+        scene
+    };
+    let base = load("baseline_quad");
+    let mesh = &base.meshes[0];
+    assert_eq!(
+        mesh.positions,
+        [[-1., -1., 0.], [1., -1., 0.], [1., 1., 0.], [-1., 1., 0.]]
+    );
+    assert_eq!(mesh.normals, [[0., 0., 1.]; 4]);
+    assert_eq!(
+        mesh.uvs,
+        [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]]
+    );
+    assert_eq!(mesh.triangles, [[0, 1, 2], [0, 2, 3]]);
+    let uv = load("uv_u");
+    let mut expected_uv = mesh.clone();
+    expected_uv.uvs[2][0] = 0.875;
+    assert_eq!(uv.meshes[0], expected_uv);
+    let normal = load("normal_sign");
+    assert_eq!(normal.meshes[0].positions, mesh.positions);
+    assert_eq!(normal.meshes[0].normals, [[0., 0., -1.]; 4]);
+    assert_eq!(normal.meshes[0].bitangents, [[0., -1., 0.]; 4]);
+    let triangle = load("triangle_count");
+    assert_eq!(triangle.meshes[0].positions, mesh.positions[..3]);
+    assert_eq!(triangle.meshes[0].triangles, [[0, 1, 2]]);
+    let vertex = load("vertex_x");
+    let positions = &vertex.meshes[0].positions;
+    // Painter normalizes the source bounds: center (0.0625,0,0), half-width 1.0625.
+    let source = [
+        [-1_f32, -1_f32, 0_f32],
+        [1.125, -1., 0.],
+        [1., 1., 0.],
+        [-1., 1., 0.],
+    ];
+    for (actual, original) in positions.iter().zip(source) {
+        let expected = [(original[0] - 0.0625) / 1.0625, original[1] / 1.0625, 0.];
+        for i in 0..3 {
+            assert!((actual[i] - expected[i]).abs() < 1e-6);
+        }
+    }
+    assert_eq!(vertex.meshes[0].uvs, mesh.uvs);
+}
+
+#[cfg(all(feature = "spp-hdf5", not(target_arch = "wasm32")))]
+#[test]
+#[ignore = "requires original owned baseline SPP; writes only an edited copy in private corpus"]
+fn owned_native_scene_uv_edit_preserves_source_and_document() {
+    use subcraft_project::spp_container::{
+        read_document, read_scene, read_scene_bytes, save_scene_copy,
+    };
+    use subcraft_project::spp_scene::SppScene;
+    let root = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("set private corpus directory"),
+    );
+    let source = root.join("baseline-full.spp");
+    let before = std::fs::read(&source).unwrap();
+    let original_document = read_document(&source).unwrap().records;
+    let bytes = read_scene_bytes(&source).unwrap();
+    let mut scene = read_scene(&source).unwrap();
+    assert_eq!(scene.scene.encode().unwrap(), bytes);
+    assert_eq!(
+        SppScene::decode(&bytes).unwrap().meshes[0].uvs[2],
+        [1., 1., 0.]
+    );
+    scene.scene.meshes[0].uvs[2][0] = 0.875;
+    let target = root.join("subcraft-rust-scene-edited.spp");
+    save_scene_copy(&source, &target, &scene).unwrap();
+    assert_eq!(std::fs::read(&source).unwrap(), before);
+    assert_eq!(read_scene(&target).unwrap().scene, scene.scene);
+    assert_eq!(read_document(&target).unwrap().records, original_document);
+}
+
+#[test]
+#[ignore = "requires owned structural scene extracts and the Painter saved UV return extract"]
+fn owned_structural_scenes_and_painter_uv_return_reencode_exactly() {
+    use subcraft_project::spp_scene::SppScene;
+    let root = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("set private corpus directory"),
+    )
+    .join("mesh-12.1.5");
+    for name in [
+        "structural_single_object",
+        "structural_two_objects_shared_material",
+        "structural_two_material_slots",
+        "painter-uv-return",
+    ] {
+        let bytes = std::fs::read(root.join(format!("{name}.prefix.scene.bin"))).unwrap();
+        let scene = SppScene::decode(&bytes).unwrap();
+        assert_eq!(scene.encode().unwrap(), bytes, "{name}");
+        let hierarchy = scene.hierarchy().unwrap();
+        let materials = scene.materials().unwrap();
+        let canonical = subcraft_project::spp_scene_mesh::build_reference_mesh(&scene).unwrap();
+        assert!(canonical.mesh.validate().is_empty());
+        assert_eq!(
+            canonical.mesh.triangle_count(),
+            scene.meshes.iter().map(|m| m.triangles.len()).sum::<usize>()
+        );
+        for (source_index, target_slot) in
+            canonical.material_slot_by_source_index.iter().enumerate()
+        {
+            if let Some(slot) = target_slot {
+                assert_eq!(
+                    Some(canonical.mesh.materials[*slot as usize].name.as_str()),
+                    materials.materials[source_index].name().unwrap()
+                );
+            }
+        }
+
+        let mut restored = scene.clone();
+        restored.set_hierarchy(&hierarchy).unwrap();
+        restored.set_materials(&materials).unwrap();
+        assert_eq!(
+            restored.encode().unwrap(),
+            bytes,
+            "{name} typed hierarchy/material identity"
+        );
+        if name == "structural_single_object" {
+            assert_eq!(hierarchy.children.len(), 1);
+            assert_eq!(hierarchy.children[0].name, "SingleObject");
+            assert_eq!(hierarchy.children[0].mesh_indices, [0]);
+            assert_eq!(
+                materials.materials[0].name().unwrap(),
+                Some("SharedMaterial")
+            );
+        }
+        if name == "painter-uv-return" {
+            assert_eq!(scene.meshes.len(), 1);
+            assert_eq!(scene.meshes[0].uvs[2], [0.875, 1., 0.]);
+        }
+        if name == "structural_two_material_slots" {
+            assert_eq!(scene.meshes.len(), 2);
+            assert_ne!(
+                scene.meshes[0].material_index,
+                scene.meshes[1].material_index
+            );
+            assert_eq!(hierarchy.children[0].mesh_indices, [0, 1]);
+            assert_eq!(materials.materials[0].name().unwrap(), Some("RedSlot"));
+            assert_eq!(materials.materials[1].name().unwrap(), Some("BlueSlot"));
+            for mesh in &scene.meshes {
+                let material = materials.materials[mesh.material_index as usize]
+                    .name()
+                    .unwrap()
+                    .unwrap();
+                let points = mesh.triangles[0].map(|i| mesh.positions[i as usize]);
+                let expected = match material {
+                    "RedSlot" => [[-1., -1., 0.], [1., -1., 0.], [1., 1., 0.]],
+                    "BlueSlot" => [[-1., -1., 0.], [1., 1., 0.], [-1., 1., 0.]],
+                    _ => panic!("unexpected original fixture material"),
+                };
+                assert_eq!(points, expected);
+            }
+        }
+        if name == "structural_two_objects_shared_material" {
+            assert_eq!(scene.meshes.len(), 2);
+            assert_eq!(
+                scene.meshes[0].material_index,
+                scene.meshes[1].material_index
+            );
+            assert_eq!(hierarchy.children.len(), 2);
+            assert_eq!(hierarchy.children[0].name, "ObjectA");
+            assert_eq!(hierarchy.children[0].mesh_indices, [0]);
+            assert_eq!(hierarchy.children[1].name, "ObjectB");
+            assert_eq!(hierarchy.children[1].mesh_indices, [1]);
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires the four owned checksum-verified uniform fill document extracts"]
+fn owned_uniform_fill_records_reencode_and_decode_linear_colors() {
+    use subcraft_project::{
+        spp_document::SppDocumentRecords, spp_fill::enumerate_uniform_base_color_sources,
+    };
+    let root = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("set private corpus directory"),
+    )
+    .join("layers-12.1.5");
+    for (name, expected) in [
+        ("blank_baseline", vec![]),
+        (
+            "single_fill_basecolor_0125_0375_0625",
+            vec![[0.125, 0.375, 0.625]],
+        ),
+        (
+            "single_fill_basecolor_025_0375_0625",
+            vec![[0.25, 0.375, 0.625]],
+        ),
+        (
+            "two_named_fill_layers_order",
+            vec![[0.1, 0.2, 0.3], [0.7, 0.6, 0.5]],
+        ),
+        ("painter-fill-return", vec![[0.25, 0.375, 0.625]]),
+    ] {
+        let bytes = std::fs::read(root.join(format!("{name}.prefix.document.bin"))).unwrap();
+        let records = SppDocumentRecords::decode(&bytes).unwrap();
+        assert_eq!(records.encode().unwrap(), bytes, "{name}");
+        let sources = enumerate_uniform_base_color_sources(&records).unwrap();
+        assert_eq!(sources.len(), expected.len(), "{name}");
+        for (source, expected) in sources.iter().zip(expected) {
+            let linear = subcraft_core::color::srgb3_to_linear(expected);
+            for i in 0..3 {
+                assert!(
+                    (source.color[i] - linear[i]).abs() < 1e-6,
+                    "{name} component {i}"
+                );
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "spp-hdf5", not(target_arch = "wasm32")))]
+#[test]
+#[ignore = "requires full owned single-fill SPP; writes only an edited copy in private corpus"]
+fn owned_native_uniform_fill_color_edit_preserves_source() {
+    use subcraft_project::{
+        spp_container::{read_document, save_document_copy},
+        spp_document::SppDocumentRecords,
+        spp_fill::{enumerate_uniform_base_color_sources, set_uniform_base_color_source},
+    };
+    let root = PathBuf::from(
+        std::env::var_os("SUBCRAFT_SPP_RESEARCH_DIR").expect("set private corpus directory"),
+    );
+    let source = root.join("single-fill-original-full.spp");
+    let before = std::fs::read(&source).unwrap();
+    let target_records = SppDocumentRecords::decode(
+        &std::fs::read(
+            root.join("layers-12.1.5/single_fill_basecolor_025_0375_0625.prefix.document.bin"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let target_color = enumerate_uniform_base_color_sources(&target_records).unwrap()[0].color;
+    let mut document = read_document(&source).unwrap();
+    let uid = enumerate_uniform_base_color_sources(&document.records).unwrap()[0].uid;
+    set_uniform_base_color_source(&mut document.records, uid, target_color).unwrap();
+    let target = root.join("subcraft-rust-fill-edited.spp");
+    save_document_copy(&source, &target, &document).unwrap();
+    assert_eq!(std::fs::read(&source).unwrap(), before);
+    assert_eq!(read_document(&target).unwrap().records, document.records);
+    assert_eq!(
+        enumerate_uniform_base_color_sources(&read_document(&target).unwrap().records).unwrap()[0]
+            .color,
+        target_color
+    );
+}

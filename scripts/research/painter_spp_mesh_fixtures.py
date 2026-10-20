@@ -68,8 +68,83 @@ def fixture_sources():
     }
 
 
+def structural_fixture_sources():
+    """Same quad arranged to isolate object hierarchy and material assignment."""
+    vertices = "\n".join(
+        "v {:.9g} {:.9g} {:.9g}".format(*point) for point in BASE_VERTICES
+    )
+    uvs = "\n".join("vt {:.9g} {:.9g}".format(*uv) for uv in BASE_UVS)
+    normals = "\n".join(
+        "vn {:.9g} {:.9g} {:.9g}".format(*normal) for normal in BASE_NORMALS
+    )
+    common = f"{vertices}\n{uvs}\n{normals}\n"
+    tri_a = "f 1/1/1 2/2/1 3/3/1"
+    tri_b = "f 1/1/1 3/3/1 4/4/1"
+
+    def obj(mtl_name, body):
+        return (
+            "# Original SubCraft structural SPP fixture\n"
+            f"mtllib {mtl_name}\n"
+            f"{common}{body}\n"
+        )
+
+    def mtl(materials):
+        lines = ["# Original SubCraft structural MTL fixture"]
+        for name, color in materials:
+            lines.extend((f"newmtl {name}", "Kd {:.6g} {:.6g} {:.6g}".format(*color)))
+        return "\n".join(lines) + "\n"
+
+    shared_mtl = [("SharedMaterial", (0.5, 0.5, 0.5))]
+    return {
+        "structural_single_object": {
+            "obj": obj(
+                "structural_single_object.mtl",
+                f"o SingleObject\nusemtl SharedMaterial\n{tri_a}\n{tri_b}",
+            ),
+            "mtl": mtl(shared_mtl),
+        },
+        "structural_two_objects_shared_material": {
+            "obj": obj(
+                "structural_two_objects_shared_material.mtl",
+                f"o ObjectA\nusemtl SharedMaterial\n{tri_a}\n"
+                f"o ObjectB\nusemtl SharedMaterial\n{tri_b}",
+            ),
+            "mtl": mtl(shared_mtl),
+        },
+        "structural_two_material_slots": {
+            "obj": obj(
+                "structural_two_material_slots.mtl",
+                f"o SingleObject\nusemtl RedSlot\n{tri_a}\n"
+                f"usemtl BlueSlot\n{tri_b}",
+            ),
+            "mtl": mtl([
+                ("RedSlot", (1.0, 0.0, 0.0)),
+                ("BlueSlot", (0.0, 0.0, 1.0)),
+            ]),
+        },
+    }
+
+
 def source_summary(text):
     counts = {"v": 0, "vt": 0, "vn": 0, "f": 0}
+    for line in text.splitlines():
+        head = line.partition(" ")[0]
+        if head in counts:
+            counts[head] += 1
+    return counts
+
+
+def obj_structure_summary(text):
+    counts = {"o": 0, "usemtl": 0, "mtllib": 0}
+    for line in text.splitlines():
+        head = line.partition(" ")[0]
+        if head in counts:
+            counts[head] += 1
+    return counts
+
+
+def mtl_summary(text):
+    counts = {"newmtl": 0, "Kd": 0}
     for line in text.splitlines():
         head = line.partition(" ")[0]
         if head in counts:
@@ -203,6 +278,14 @@ def main():
         action="store_true",
         help="Save fixture-only SPPs; leave scene_assbin null for external h5dump inspection",
     )
+    parser.add_argument(
+        "--structural",
+        action="store_true",
+        help=(
+            "also save a controlled same-quad group varying OBJ object hierarchy "
+            "and named MTL material slots"
+        ),
+    )
     args = parser.parse_args()
     if not args.painter.is_file():
         raise RuntimeError("Painter executable does not exist")
@@ -219,10 +302,16 @@ def main():
 
     root = Path(tempfile.mkdtemp(prefix="subcraft-spp-mesh-fixtures-"))
     print(json.dumps({"stage": "private_fixture_directory", "root": str(root)}), flush=True)
-    sources = fixture_sources()
+    fixture_specs = {
+        name: {"obj": text, "mtl": None}
+        for name, text in fixture_sources().items()
+    }
+    if args.structural:
+        fixture_specs.update(structural_fixture_sources())
     obj_paths = {}
     source_records = {}
-    for name, text in sources.items():
+    for name, spec in fixture_specs.items():
+        text = spec["obj"]
         path = root / f"{name}.obj"
         encoded = text.encode("utf-8")
         path.write_bytes(encoded)
@@ -233,6 +322,17 @@ def main():
             "sha256": hashlib.sha256(encoded).hexdigest(),
             "counts": source_summary(text),
         }
+        if spec["mtl"] is not None:
+            mtl_path = root / f"{name}.mtl"
+            mtl_encoded = spec["mtl"].encode("utf-8")
+            mtl_path.write_bytes(mtl_encoded)
+            source_records[name]["obj_structure_counts"] = obj_structure_summary(text)
+            source_records[name]["source_mtl"] = {
+                "name": mtl_path.name,
+                "bytes": len(mtl_encoded),
+                "sha256": hashlib.sha256(mtl_encoded).hexdigest(),
+                "counts": mtl_summary(spec["mtl"]),
+            }
 
     deadline = time.monotonic() + args.timeout
     launch_env = set_low_impact_environment()
@@ -348,6 +448,7 @@ def main():
             "painter_api_version": api_version,
             "scene_dataset": "/paint/scene.assbin",
             "scene_inspection_skipped": args.skip_scene_inspection,
+            "structural_fixtures_included": args.structural,
             "limits": {
                 "max_spp_bytes": MAX_SPP_BYTES,
                 "max_scene_bytes": MAX_SCENE_BYTES,

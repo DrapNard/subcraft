@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Experimental bounded codec for owned blank-paint-layer document.bin fixtures.
+"""Experimental bounded codec for owned Painter document.bin fixtures.
 
 Clean-room observations only. Not an SPP importer/writer: container checksums,
-resources, mesh, nonempty tags and other property types remain unresolved.
+resources, mesh and unknown property types remain unresolved.
 The CLI only compares reencoded dataset bytes and never writes an SPP file.
 """
 import struct,sys,json,math
@@ -27,6 +27,21 @@ class Reader:
   if any(existing[0]==name for existing in self.classes):raise ValueError('duplicate class name')
   if len(self.classes)>=256:raise ValueError('class cap')
   self.classes.append((name,props));return len(self.classes)-1
+ def class_ref(self):
+  cid=self.u32()
+  if cid==0xffffffff: return self.definition()
+  if cid>=len(self.classes):raise ValueError(f'class {cid} at {self.p:x}')
+  return cid
+ def fields(self,cid,depth=0):
+  if depth>32:raise ValueError('depth cap')
+  self.objects+=1
+  if self.objects>4096:raise ValueError('object cap')
+  name,props=self.classes[cid];data={}
+  for prop,kind in props:
+   pos=self.p
+   try:data[prop]=self.value(kind,depth+1)
+   except Exception as e:raise ValueError(f'{name}.{prop} type{kind} offset{pos:x}: {e}') from e
+  return {'class':name,'fields':data}
  def object(self,depth=0,pointer=True):
   self.objects+=1
   if depth>32 or self.objects>4096:raise ValueError('depth/object cap')
@@ -35,22 +50,21 @@ class Reader:
    end=self.u32()
    if end==0:return None
    if end<self.p or end>len(self.b):raise ValueError(f'bad end {end:x} at {start:x}')
-  cid=self.u32()
-  if cid==0xffffffff:cid=self.definition()
-  if cid>=len(self.classes):raise ValueError(f'class {cid} at {start:x}')
-  name,props=self.classes[cid];data={}
-  for prop,kind in props:
-   pos=self.p
-   try:data[prop]=self.value(kind,depth+1)
-   except Exception as e:raise ValueError(f'{name}.{prop} type{kind} offset{pos:x}: {e}') from e
-  if end is not None and self.p!=end:raise ValueError(f'{name} end mismatch got{self.p:x} expected{end:x}')
-  return {'class':name,'start':start,'end':self.p,'fields':data}
+  cid=self.class_ref()
+  self.objects-=1
+  data=self.fields(cid,depth)
+  if end is not None and self.p!=end:raise ValueError(f'{data["class"]} end mismatch got{self.p:x} expected{end:x}')
+  data['start']=start;data['end']=self.p
+  return data
  def value(self,t,d):
   if t==1:
    v=struct.unpack('<f',self.take(4))[0]
    if not math.isfinite(v):raise ValueError('float')
    return v
+  if t==2:return self.take(8).hex()
+  if t==3:return self.take(12).hex()
   if t in (4,22):return self.take(16).hex()
+  if t==14:return self.take(64).hex()
   if t==6:return [self.u32(),self.u32()]
   if t==9:return self.u32()
   if t==10:
@@ -59,51 +73,84 @@ class Reader:
    return v==255
   if t in (12,15,21):return struct.unpack('<Q',self.take(8))[0]
   if t==16:return self.text()
-  if t==17:return [self.object(d,False) for _ in range(self.count())]
+  if t==17:
+   count=self.count()
+   if count>4096-self.objects:raise ValueError('object cap')
+   if not count:return []
+   cid=self.class_ref()
+   return [self.fields(cid,d) for _ in range(count)]
   if t in (18,20):return self.object(d,True)
-  if t==19:return [self.object(d,True) for _ in range(self.count())]
-  if t==11:
-   n=self.u32()
-   if n:raise ValueError(f'unresolved nonempty type{t} ({n})')
-   return []
+  if t==19:
+   count=self.count()
+   if count>4096-self.objects:raise ValueError('object cap')
+   return [self.object(d,True) for _ in range(count)]
+  if t==11:return self.u32()
   raise ValueError(f'unresolved type{t}')
 
 class Writer:
- def __init__(self,header,classes):self.b=bytearray(header[:20]);self.classes=classes;self.seen=[]
- def u32(self,v):self.b.extend(struct.pack('<I',v))
+ def __init__(self,header,classes):
+  if len(classes)>256 or any(len(props)>128 for _,props in classes):raise ValueError('schema cap')
+  self.b=bytearray(header[:20]);self.classes=classes;self.seen=[];self.objects=0
+ def put(self,data):
+  if len(self.b)+len(data)>65536:raise ValueError('dataset cap')
+  self.b.extend(data)
+ def u32(self,v):self.put(struct.pack('<I',v))
  def text(self,v):
-  b=v.encode('utf8');self.u32(len(b));self.b.extend(b)
- def object(self,obj,pointer=True):
+  b=v.encode('utf8')
+  if len(b)>4096:raise ValueError('text cap')
+  self.u32(len(b));self.put(b)
+ def class_ref(self,obj):
+  name=obj['class'];cid=next(i for i,c in enumerate(self.classes) if c[0]==name)
+  if cid not in self.seen:
+   if cid!=len(self.seen):raise ValueError('class definition order')
+   self.seen.append(cid);self.u32(0xffffffff);self.text(name);self.u32(len(self.classes[cid][1]))
+   for key,t in self.classes[cid][1]:self.text(key);self.u32(t)
+  else:self.u32(cid)
+  return cid
+ def fields(self,obj,cid,depth=0):
+  if depth>32:raise ValueError('depth cap')
+  self.objects+=1
+  if self.objects>4096:raise ValueError('object cap')
+  for key,t in self.classes[cid][1]:self.value(t,obj['fields'][key],depth+1)
+ def object(self,obj,pointer=True,depth=0):
+  if depth>32:raise ValueError('depth cap')
+  self.objects+=1
+  if self.objects>4096:raise ValueError('object cap')
   start=len(self.b)
   if pointer:
    self.u32(0)
    if obj is None:return
-  name=obj['class'];cid=next(i for i,c in enumerate(self.classes) if c[0]==name)
-  if cid not in self.seen:
-   assert cid==len(self.seen)
-   self.seen.append(cid);self.u32(0xffffffff);self.text(name);self.u32(len(self.classes[cid][1]))
-   for key,t in self.classes[cid][1]:self.text(key);self.u32(t)
-  else:self.u32(cid)
-  for key,t in self.classes[cid][1]:self.value(t,obj['fields'][key])
+  cid=self.class_ref(obj)
+  # This object was already charged above; its fields are serialized directly here.
+  for key,t in self.classes[cid][1]:self.value(t,obj['fields'][key],depth+1)
   if pointer:struct.pack_into('<I',self.b,start,len(self.b))
- def value(self,t,v):
-  if t==1:self.b.extend(struct.pack('<f',v))
-  elif t in (4,22):
+ def value(self,t,v,depth=0):
+  if depth>32:raise ValueError('depth cap')
+  if t==1:self.put(struct.pack('<f',v))
+  elif t in (2,3,4,14,22):
    raw=bytes.fromhex(v)
-   if len(raw)!=16:raise ValueError('invalid opaque16 size')
-   self.b.extend(raw)
+   expected={2:8,3:12,4:16,14:64,22:16}[t]
+   if len(raw)!=expected:raise ValueError(f'invalid opaque{expected} size')
+   self.put(raw)
   elif t==6:
    for n in v:self.u32(n)
   elif t==9:self.u32(v)
-  elif t==10:self.b.append(255 if v else 0)
-  elif t in (12,15,21):self.b.extend(struct.pack('<Q',v))
+  elif t==10:self.put(bytes((255 if v else 0,)))
+  elif t in (12,15,21):self.put(struct.pack('<Q',v))
   elif t==16:self.text(v)
-  elif t in (17,19):
+  elif t==17:
+   if len(v)>4096-self.objects:raise ValueError('object cap')
    self.u32(len(v))
-   for item in v:self.object(item,t==19)
-  elif t in (18,20):self.object(v)
-  elif t==11:
-   assert not v;self.u32(0)
+   if v:
+    cid=self.class_ref(v[0])
+    if any(item['class']!=v[0]['class'] for item in v):raise ValueError('heterogeneous inline object array')
+    for item in v:self.fields(item,cid,depth+1)
+  elif t==19:
+   if len(v)>4096-self.objects:raise ValueError('object cap')
+   self.u32(len(v))
+   for item in v:self.object(item,True,depth+1)
+  elif t in (18,20):self.object(v,True,depth+1)
+  elif t==11:self.u32(v)
   else:raise ValueError(t)
 if __name__=='__main__':
  for path in sys.argv[1:]:

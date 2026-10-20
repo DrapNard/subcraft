@@ -250,3 +250,123 @@ The harness and synthetic tests are committed; mesh decoding is not implemented.
 Remaining: mesh/resource/Session mapping, strokes/fills/masks, broader channel
 coverage, length-changing writes, isolated native parsing and full editor
 open/edit/save acceptance. USPP is the subsequent phase; see [audit](uspp-format.md).
+
+## Scene geometry and reverse UV acceptance — 2026-10-20
+
+A clean-room scene codec now reads the observed **1.7** payload. It is not
+Assimp 1.0: the shared header is followed by inclusive-length `u64` sections,
+counted vector arrays, and observed triangle records rather than standard
+Assimp chunk IDs. The supported component mask is `0x107`, with positions,
+normals, tangent/bitangent vectors and one two-component UV set. Unsupported
+versions, layouts, markers and extensions reject. Node metadata, unknown
+material property values and the remaining scene tail are preserved exactly.
+
+Five independent original OBJ files establish vertex, UV, normal and triangle
+boundaries. Three additional original OBJ/MTL files isolate single-object,
+two-object/shared-material and one-object/two-material behavior. These establish
+node mesh references, duplicated vector counts, and material table indices.
+Mesh order is different from OBJ face/material declaration order; the private
+checks compare actual triangle coordinates and material names, not ordinals.
+Matrices are retained as raw bits; general transform application is unverified.
+The structural fixture runtime evidence is
+`ev_2439435a932ff310f068e0aa193508037a7c41805c1df9e02cef6f4c10610643`.
+
+The native Rust writer changed one original quad's UV U from 1.0 to 0.875,
+rewrote its scene checksum in an atomic source copy, then reread it. Original
+source and document records stayed unchanged. Source SHA-256 was
+`ab393eb6c32ccd0eb096241a39db2ef3a08dd57599d97b8389a6fc685b2cb56e`;
+Rust output SHA-256 was
+`104f413a40ec23aef9a182edb8506c996445655197019fc53acc3dd202b59c62`.
+Twenty bytes differed. Transport to the owned Painter host applied only those
+bounded changed-byte ranges to a hash-matched original private copy and verified
+the complete resulting archive hash; this did not substitute a second writer.
+
+Painter reopened that exact Rust output in edition state. Its documented
+[`export_mesh(..., MeshExportOption.BaseMesh)`](https://experienceleague.adobe.com/en/docs/substance-3d-dev/painter-python/api/substancepainter-package/export#export-mesh)
+returned success and exported the UV `(0.875, 1.0)`. Both input archive hashes
+remained unchanged. Painter then saved a full return copy, SHA-256
+`f3dbd83b69a3f39802fe700773ed62c73a82e02f99ff562f1652a22429b3fb00`.
+Rust decoded and exactly reencoded the returned scene, including that UV value.
+Runtime evidence:
+`ev_7720cdc2a7082dfedaaae521a5561abe1008ec0eb0f7370e78c5499adb62d918`, exit 0.
+Filesystem observations were scoped to the probe's private output directory;
+source hashes were explicit script checks. Process sampling and prelaunch image
+identity retain the limitations described in the evidence. This is scoped mesh
+roundtrip acceptance, not a full editor/project support claim.
+
+Only bounded header and tail ranges were retrieved for the new private scene
+extracts when the usual file-transfer connection was unavailable. Those sparse
+research carriers are **not whole SPP archives** and must never be used as save
+sources. HDF5 selected-dataset reads locate each real scene, check that its data
+lies within a retrieved range, and independently verify the stored Murmur hash.
+The observed scene dataset and checksum bytes are complete. The return scene
+SHA-256 is `a0c56f2e71d659a39cfe9f6676f74c86f7ba95e1c9a6a06063637aca926972bc`.
+All original fixtures and extracted data remain outside Git.
+
+## Uniform fill color: rendered acceptance and cache correction — 2026-10-20
+
+Four fresh, owned projects were authored through the documented
+[uniform color API](https://experienceleague.adobe.com/en/docs/substance-3d-dev/painter-python/api/substancepainter-package/source-module/uniformcolor):
+an empty stack, two single-fill color variants and two named fills. API readback
+establishes fill types, values, UIDs and top-to-bottom order; encoded stack items
+are bottom-to-top in these fixtures. Runtime evidence:
+`ev_c1ad0a952c56b53a37dc6901d19fd96a983012b92a973b20e7858ac53c085f19`.
+
+These fixtures corrected two earlier codec assumptions. Type 11 is a fixed
+four-byte primitive, rather than a zero-length-only placeholder. Type 17 arrays
+share one class definition/reference, then serialize homogeneous element fields;
+they do not repeat a class header per element. Observed types 2, 3 and 14 are
+retained as opaque 8-, 12- and 64-byte payloads. Public [primitive-size](https://github.com/Yeusepe/Universal-Painter-Files/blob/379b2fc64dcf299e8e953d43a3c7df246845d044/spp_downgrader/spp_extractor/lib/hbo_reserializer/serializer.py) and [shared array contracts](https://github.com/Yeusepe/Universal-Painter-Files/blob/379b2fc64dcf299e8e953d43a3c7df246845d044/spp_downgrader/spp_extractor/lib/hbo_reserializer/_readers.py) in the pinned Universal Painter Files source independently
+corroborate the widths/layout; complete owned record boundaries and exact
+reencoding test the result. No meaning is assigned to other opaque payloads.
+
+The narrow uniform-source helper interprets only the verified Base Color token,
+stable source UID and three little-endian linear RGB floats. The public
+[color API contract](https://experienceleague.adobe.com/en/docs/substance-3d-dev/painter-python/api/substancepainter-package/colormanagement)
+and API working-space readback corroborate the linear values. Other material,
+projection, mask, channel and shader behavior is not an implemented fill import.
+
+A full original fill archive was reconstructed locally using bounded literal
+ranges and matching blocks from an already-owned identical baseline. Its complete
+SHA-256 matched the Painter original, unlike the explicitly sparse research
+carriers described above. No resource bytes are committed. Rust edited its color
+source and saved a staged full archive with source preservation.
+
+An initial Painter reopen read the new color but exported the **old cached RGB**
+`[32, 96, 159]` (`ev_69b2e0c4be7422fe74b94a1757fff4676cc6d498c9c9bf43b39b05b34518ea12`).
+This failed rendered acceptance. The writer now invalidates derived payloads
+under `/texture-cache` after document or scene changes. It preserves the cache
+hierarchy/attributes, unknown artist resources elsewhere and no-op caches.
+Non-hard/aliased/oversized cache graphs and explicit persistent cache pins reject
+instead of being dropped. More pinned/nonblank-paint fixtures remain necessary.
+
+With that correction, Painter reopened the native Rust output and exported a
+128×128 Base Color PNG. A bounded PNG decoder verified its center RGB changed
+from `[32, 96, 159]` to **`[64, 96, 159]`**. API sRGB readback changed from
+`[0.125, 0.375, 0.625]` to `[0.25, 0.375, 0.625]`, within float tolerance;
+working-space red changed from `0.014349873` to `0.050876088`. This checks the
+rendered result as well as record metadata. Both input archives stayed unchanged.
+Evidence: `ev_2ee671e7b004527385ccc692e89ffa9d5b96ecae45f3c6e296191099e638989d`, exit 0.
+
+Source archive SHA-256:
+`0d956e825fefb0d0022663aa0a101193807321700de00d8b6599439f11ee044d`.
+Rust output SHA-256:
+`1178d4d5a2b6407c9bacc6eb7d2140c9b9d98004ec87b768ff01a3d21e6beb96`.
+Painter full return SHA-256:
+`9010edc2e03764865c5b0f9cf5dc3e5d0afd8e2be27c9723e4ffa6d0770fea73`.
+The return document dataset checksum was independently verified; Rust reencoding
+and linear-color acceptance are included in the opt-in private corpus suite.
+
+Filesystem snapshots cover the probe's private output directory, not unrelated
+files; explicit source SHA checks establish the narrower immutability claim.
+Process sampling and executable binding limitations remain in the evidence.
+This result proves the controlled uniform-source edit and rendered round trip,
+not full SPP editor support, masks, brush strokes, smart materials or USPP.
+
+
+Current serialized local verification after the cache correction: **94 project
+unit tests and 8 private corpus tests pass**, including canonical mesh conversion,
+linear fill colors and the Painter fill return. **23 Python tests pass**.
+Workspace compilation passes. This does not prove the still-missing application
+SPP path; ordinary Session open/save continues to reject `.spp` until the complete
+semantic mapping and isolated worker are integrated.

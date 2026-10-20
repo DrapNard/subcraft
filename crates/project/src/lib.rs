@@ -22,6 +22,11 @@ pub mod spp_checksum;
 pub mod spp_container;
 pub mod spp_document;
 pub mod spp_semantics;
+pub mod spp_fill;
+pub mod spp_scene;
+pub mod spp_scene_node;
+pub mod spp_scene_material;
+pub mod spp_scene_mesh;
 
 use std::collections::BTreeMap;
 use std::io::{Read, Seek, Write};
